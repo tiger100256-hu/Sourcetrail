@@ -7,12 +7,20 @@ CxxIndexerCommandProvider::CxxIndexerCommandProvider(): m_nextId(1) {}
 
 void CxxIndexerCommandProvider::addCommand(const std::shared_ptr<IndexerCommandCxx>& command)
 {
+	static std::shared_ptr<CommandRepresentation> static_representation = nullptr;
 	std::shared_ptr<CommandRepresentation> representation = std::make_shared<CommandRepresentation>();
-
+	if (static_representation != nullptr)
+	{
+		representation->m_indexedPathIds = static_representation->m_indexedPathIds;
+	} else
 	{
 		for (const FilePath& indexedPath: command->getIndexedPaths())
 		{
-			std::map<FilePath, Id>::const_iterator it = m_indexedPathsToIds.find(indexedPath);
+			const Id id = getId();
+			m_indexedPathsToIds[indexedPath] = id;
+			m_idsToIndexedPaths[id] = indexedPath;
+			representation->m_indexedPathIds.emplace(id);
+		    /*std::map<FilePath, Id>::const_iterator it = m_indexedPathsToIds.find(indexedPath);
 			if (it != m_indexedPathsToIds.end())
 			{
 				representation->m_indexedPathIds.emplace(it->second);
@@ -23,14 +31,18 @@ void CxxIndexerCommandProvider::addCommand(const std::shared_ptr<IndexerCommandC
 				m_indexedPathsToIds[indexedPath] = id;
 				m_idsToIndexedPaths[id] = indexedPath;
 				representation->m_indexedPathIds.emplace(id);
-			}
+			}*/
 		}
 	}
 
 	{
 		for (const FilePathFilter& excludeFilter: command->getExcludeFilters())
 		{
-			std::map<std::wstring, Id>::const_iterator it = m_excludeFiltersToIds.find(
+			const Id id = getId();
+			m_excludeFiltersToIds[excludeFilter.wstr()] = id;
+			m_idsToExcludeFilters[id] = excludeFilter.wstr();
+			representation->m_excludeFilterIds.emplace(id);
+			/*std::map<std::wstring, Id>::const_iterator it = m_excludeFiltersToIds.find(
 				excludeFilter.wstr());
 			if (it != m_excludeFiltersToIds.end())
 			{
@@ -42,14 +54,18 @@ void CxxIndexerCommandProvider::addCommand(const std::shared_ptr<IndexerCommandC
 				m_excludeFiltersToIds[excludeFilter.wstr()] = id;
 				m_idsToExcludeFilters[id] = excludeFilter.wstr();
 				representation->m_excludeFilterIds.emplace(id);
-			}
+			}*/
 		}
 	}
 
 	{
 		for (const FilePathFilter& includeFilter: command->getIncludeFilters())
 		{
-			std::map<std::wstring, Id>::const_iterator it = m_includeFiltersToIds.find(
+			const Id id = getId();
+			m_includeFiltersToIds[includeFilter.wstr()] = id;
+			m_idsToIncludeFilters[id] = includeFilter.wstr();
+			representation->m_includeFilterIds.emplace(id);
+			/*std::map<std::wstring, Id>::const_iterator it = m_includeFiltersToIds.find(
 				includeFilter.wstr());
 			if (it != m_includeFiltersToIds.end())
 			{
@@ -61,7 +77,7 @@ void CxxIndexerCommandProvider::addCommand(const std::shared_ptr<IndexerCommandC
 				m_includeFiltersToIds[includeFilter.wstr()] = id;
 				m_idsToIncludeFilters[id] = includeFilter.wstr();
 				representation->m_includeFilterIds.emplace(id);
-			}
+			}*/
 		}
 	}
 
@@ -86,7 +102,11 @@ void CxxIndexerCommandProvider::addCommand(const std::shared_ptr<IndexerCommandC
 		representation->m_compilerFlagIds.reserve(compilerFlags.size());
 		for (const std::wstring& compilerFlag: compilerFlags)
 		{
-			std::unordered_map<std::wstring, Id>::const_iterator it = m_compilerFlagsToIds.find(
+			const Id id = getId();
+			m_compilerFlagsToIds.emplace(compilerFlag, id);
+			m_idsToCompilerFlags.emplace(id, compilerFlag);
+			representation->m_compilerFlagIds.emplace_back(id);
+			/*std::unordered_map<std::wstring, Id>::const_iterator it = m_compilerFlagsToIds.find(
 				compilerFlag);
 			if (it != m_compilerFlagsToIds.end())
 			{
@@ -98,10 +118,10 @@ void CxxIndexerCommandProvider::addCommand(const std::shared_ptr<IndexerCommandC
 				m_compilerFlagsToIds.emplace(compilerFlag, id);
 				m_idsToCompilerFlags.emplace(id, compilerFlag);
 				representation->m_compilerFlagIds.emplace_back(id);
-			}
+			}*/
 		}
 	}
-
+	static_representation = representation;
 	m_commands.emplace(command->getSourceFilePath(), representation);
 }
 

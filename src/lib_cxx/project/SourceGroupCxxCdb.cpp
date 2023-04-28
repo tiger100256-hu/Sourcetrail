@@ -119,6 +119,10 @@ std::shared_ptr<IndexerCommandProvider> SourceGroupCxxCdb::getIndexerCommandProv
 				command.CommandLine, [](const std::string& s) { return utility::decodeFromUtf8(s); });
 
 			utility::removeIncludePchFlag(cdbFlags);
+#if defined(WIN32) || defined(_WIN32) || defined(__WIN32) && !defined(__CYGWIN__)
+			utility::removeWindowsFlag(cdbFlags);
+#endif
+			
 
 			if (command.CommandLine.size() != cdbFlags.size())
 			{

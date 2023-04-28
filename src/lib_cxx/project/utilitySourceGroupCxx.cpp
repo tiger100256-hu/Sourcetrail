@@ -178,6 +178,19 @@ void removeIncludePchFlag(std::vector<std::wstring>& args)
 		}
 	}
 }
+void removeWindowsFlag(std::vector<std::wstring>& args)
+{
+	const std::wstring includePchPrefix = L"/";
+	for (size_t i = 0; i < args.size(); i++)
+	{
+		const std::wstring arg = utility::trim(args[i]);
+		if (utility::isPrefix<std::wstring>(includePchPrefix, arg))
+		{
+			args.erase(args.begin() + i);
+			i--;
+		}
+	}
+}
 
 std::vector<std::wstring> getIncludePchFlags(const SourceGroupSettingsWithCxxPchOptions* settings)
 {

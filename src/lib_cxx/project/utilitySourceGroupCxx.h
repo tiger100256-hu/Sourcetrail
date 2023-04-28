@@ -33,6 +33,7 @@ bool containsIncludePchFlags(std::shared_ptr<clang::tooling::JSONCompilationData
 bool containsIncludePchFlag(const std::vector<std::string>& args);
 std::vector<std::wstring> getWithRemoveIncludePchFlag(const std::vector<std::wstring>& args);
 void removeIncludePchFlag(std::vector<std::wstring>& args);
+void removeWindowsFlag(std::vector<std::wstring>& args);
 std::vector<std::wstring> getIncludePchFlags(const SourceGroupSettingsWithCxxPchOptions* settings);
 }	 // namespace utility
 
