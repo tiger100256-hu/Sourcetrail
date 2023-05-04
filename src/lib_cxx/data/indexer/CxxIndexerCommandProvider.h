@@ -52,6 +52,7 @@ private:
 	std::map<FilePath, Id> m_workingDirectoriesToIds;
 	std::map<Id, std::wstring> m_idsToCompilerFlags;
 	std::unordered_map<std::wstring, Id> m_compilerFlagsToIds;
+	std::shared_ptr<CommandRepresentation> m_representation = nullptr;
 };
 
 #endif	  // CXX_INDEXER_COMMAND_PROVIDER_H
