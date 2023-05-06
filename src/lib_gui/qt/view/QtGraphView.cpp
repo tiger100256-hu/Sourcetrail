@@ -431,7 +431,7 @@ void QtGraphView::rebuildGraph(
 		if (params.animatedTransition && ApplicationSettings::getInstance()->getUseAnimations() &&
 			view->isVisible())
 		{
-			createTransition();
+ 			createTransition();
 		}
 		else
 		{
@@ -1363,41 +1363,43 @@ void QtGraphView::createTransition()
 	// fade out
 	if (vanishingNodes.size() || m_oldEdges.size())
 	{
-		QParallelAnimationGroup* vanish = new QParallelAnimationGroup();
+		// QParallelAnimationGroup* vanish = new QParallelAnimationGroup();
 
 		for (QtGraphNode* node: vanishingNodes)
 		{
-			QPropertyAnimation* anim = new QPropertyAnimation(node, QByteArrayLiteral("opacity"));
-			anim->setDuration(300);
-			anim->setStartValue(1.0f);
-			anim->setEndValue(0.0f);
+			//QPropertyAnimation* anim = new QPropertyAnimation(node, QByteArrayLiteral("opacity"));
+			//anim->setDuration(300);
+			//anim->setStartValue(1.0f);
+			//anim->setEndValue(0.0f);
 
-			vanish->addAnimation(anim);
+			//vanish->addAnimation(anim);
+			node->setOpacity(0.0f);
 		}
 
 		for (QtGraphEdge* edge: m_oldEdges)
 		{
-			QPropertyAnimation* anim = new QPropertyAnimation(edge, QByteArrayLiteral("opacity"));
+			/*QPropertyAnimation* anim = new QPropertyAnimation(edge, QByteArrayLiteral("opacity"));
 			anim->setDuration(150);
 			anim->setStartValue(1.0f);
 			anim->setEndValue(0.0f);
 
-			vanish->addAnimation(anim);
+			vanish->addAnimation(anim);*/
+			edge->setOpacity(0.0f);
 		}
 
-		m_transition->addAnimation(vanish);
+		// m_transition->addAnimation(vanish);
 	}
 
 	// move and scale
 	{
-		QParallelAnimationGroup* remain = new QParallelAnimationGroup();
+		// QParallelAnimationGroup* remain = new QParallelAnimationGroup();
 
 		for (std::pair<QtGraphNode*, QtGraphNode*> p: remainingNodes)
 		{
 			QtGraphNode* newNode = p.first;
 			QtGraphNode* oldNode = p.second;
 
-			QPropertyAnimation* anim = new QPropertyAnimation(oldNode, QByteArrayLiteral("pos"));
+		/*	QPropertyAnimation* anim = new QPropertyAnimation(oldNode, QByteArrayLiteral("pos"));
 			anim->setDuration(300);
 			anim->setStartValue(oldNode->pos());
 			anim->setEndValue(newNode->pos());
@@ -1405,15 +1407,19 @@ void QtGraphView::createTransition()
 			remain->addAnimation(anim);
 
 			connect(anim, &QPropertyAnimation::finished, newNode, &QtGraphNode::showNode);
-			connect(anim, &QPropertyAnimation::finished, oldNode, &QtGraphNode::hideNode);
-			newNode->hide();
+			connect(anim, &QPropertyAnimation::finished, oldNode, &QtGraphNode::hideNode);*/
+			oldNode->setPos(newNode->pos());
+			newNode->showNode();
+			oldNode->hideNode();
+			// newNode->hide();
 
-			anim = new QPropertyAnimation(oldNode, QByteArrayLiteral("size"));
+			/*anim = new QPropertyAnimation(oldNode, QByteArrayLiteral("size"));
 			anim->setDuration(300);
 			anim->setStartValue(oldNode->size());
 			anim->setEndValue(newNode->size());
 
-			remain->addAnimation(anim);
+			remain->addAnimation(anim);*/
+			oldNode->setSize(newNode->size());
 
 			if (newNode->isAccessNode() && newNode->getSubNodes().size() == 0 &&
 				oldNode->getSubNodes().size() > 0)
@@ -1422,58 +1428,62 @@ void QtGraphView::createTransition()
 			}
 		}
 
-		QPropertyAnimation* anim = new QPropertyAnimation(view, QByteArrayLiteral("sceneRect"));
+		/*QPropertyAnimation* anim = new QPropertyAnimation(view, QByteArrayLiteral("sceneRect"));
 		anim->setStartValue(view->sceneRect());
 		anim->setEndValue(getSceneRect(m_nodes));
 
-		anim->setDuration(300);
+		anim->setDuration(300);*/
+		view->setSceneRect(getSceneRect(m_nodes));
 
 		if (!remainingNodes.size() || m_scrollToTop || m_restoreScroll)
 		{
-			connect(anim, &QPropertyAnimation::finished, this, &QtGraphView::updateScrollBars);
+			// connect(anim, &QPropertyAnimation::finished, this, &QtGraphView::updateScrollBars);
+			updateScrollBars();
 		}
 
-		remain->addAnimation(anim);
+		// remain->addAnimation(anim);
 
-		m_transition->addAnimation(remain);
+		// m_transition->addAnimation(remain);
 	}
 
 	// fade in
 	if (appearingNodes.size() || m_edges.size())
 	{
-		QParallelAnimationGroup* appear = new QParallelAnimationGroup();
+		// QParallelAnimationGroup* appear = new QParallelAnimationGroup();
 
 		for (QtGraphNode* node: appearingNodes)
 		{
-			QPropertyAnimation* anim = new QPropertyAnimation(node, "opacity");
+			/*QPropertyAnimation* anim = new QPropertyAnimation(node, "opacity");
 			anim->setDuration(300);
 			anim->setStartValue(0.0f);
-			anim->setEndValue(1.0f);
+			anim->setEndValue(1.0f);*/
+			node->setOpacity(1.0f);
+			//appear->addAnimation(anim);
 
-			appear->addAnimation(anim);
-
-			connect(anim, &QPropertyAnimation::finished, node, &QtGraphNode::blendIn);
-			node->blendOut();
+			//connect(anim, &QPropertyAnimation::finished, node, &QtGraphNode::blendIn);
+			//node->blendOut();
+			node->blendIn();
 		}
 
 		for (QtGraphEdge* edge: m_edges)
 		{
-			QPropertyAnimation* anim = new QPropertyAnimation(edge, "opacity");
+			/*QPropertyAnimation* anim = new QPropertyAnimation(edge, "opacity");
 			anim->setDuration(150);
 			anim->setStartValue(0.0f);
-			anim->setEndValue(1.0f);
+			anim->setEndValue(1.0f);*/
+			edge->setOpacity(1.0f);
+			//appear->addAnimation(anim);
 
-			appear->addAnimation(anim);
-
-			edge->setOpacity(0.0f);
+			//edge->setOpacity(0.0f);
 		}
 
-		m_transition->addAnimation(appear);
+		//m_transition->addAnimation(appear);
 	}
 
-	connect(
+	/*connect(
 		m_transition.get(), &QPropertyAnimation::finished, this, &QtGraphView::finishedTransition);
-	m_transition->start();
+	m_transition->start();*/
+	finishedTransition();
 }
 
 bool QtGraphView::isTransitioning() const
