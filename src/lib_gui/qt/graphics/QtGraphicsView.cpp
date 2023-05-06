@@ -185,7 +185,7 @@ void QtGraphicsView::setSceneRect(const QRectF& rect)
 {
 	QGraphicsView::setSceneRect(rect);
 	scene()->setSceneRect(rect);
-	m_imageCached = toQImage();
+	//m_imageCached = toQImage();
 	m_tabId = TabId::currentTab();
 }
 
@@ -858,8 +858,10 @@ void QtGraphicsView::updateTransform()
 
 void QtGraphicsView::handleMessage(MessageSaveAsImage* message)
 {
-	if ( (message->getSchedulerId() == getSchedulerId()) && !m_imageCached.isNull() )
+	//if ( (message->getSchedulerId() == getSchedulerId()) && !m_imageCached.isNull() )
+	if (message->getSchedulerId() == getSchedulerId())
 	{
+		m_imageCached = toQImage();
 		m_imageCached.save(message->path);
 	}
 }
