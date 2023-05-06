@@ -8,6 +8,7 @@
 #include "types.h"
 #include "MessageListener.h"
 #include "MessageSaveAsImage.h"
+#include "FilePath.h"
 
 
 class GraphFocusHandler;
@@ -99,6 +100,7 @@ private:
 	void updateTransform();
 
 	void handleMessage(MessageSaveAsImage* message) override;
+	void saveGraph(FilePath& filePath);
 
 	GraphFocusHandler* m_focusHandler;
 

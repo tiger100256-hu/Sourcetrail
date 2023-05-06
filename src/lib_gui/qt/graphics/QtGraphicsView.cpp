@@ -10,6 +10,7 @@
 #include <QParallelAnimationGroup>
 #include <QPropertyAnimation>
 #include <QSvgGenerator>
+#include <QDebug>
 
 #include "ApplicationSettings.h"
 #include "GraphFocusHandler.h"
@@ -679,8 +680,23 @@ QImage QtGraphicsView::toQImage()
 {
 	const QString exportNotice = QStringLiteral("Exported from Sourcetrail");
 	const int margin = 10;
+	QSize image_size = scene()->sceneRect().size().toSize()* 2;
+	int64_t max_length = 2147483647;
+	int64_t image_width = image_size.width();
+	int64_t image_height = image_size.height();
+	if (image_width * image_height * 4 > max_length)
+	{	
+		if (image_width > image_height)
+		{
+			image_size.setWidth(max_length / (4 * image_height));
+		}
+		else
+		{
+			image_size.setHeight(max_length / (4 * image_width));
+		}		
+	}
 
-	QImage image(scene()->sceneRect().size().toSize() * 2, QImage::Format_ARGB32);
+	QImage image(image_size, QImage::Format_ARGB32);
 	image.fill(Qt::transparent);
 
 	QPainter painter(&image);
@@ -714,20 +730,9 @@ QImage QtGraphicsView::toQImage()
 
 	return image;
 }
-
-void QtGraphicsView::exportGraph()
-{
+void QtGraphicsView::saveGraph(FilePath& filePath) {
 	const QString exportNotice = QStringLiteral("Exported from Sourcetrail");
 	const int margin = 10;
-
-	FilePath filePath(
-		QtFileDialog::showSaveFileDialog(
-			nullptr,
-			QStringLiteral("Save image"),
-			FilePath(),
-			QStringLiteral("PNG (*.png);;JPEG (*.JPEG);;BMP Files (*.bmp);;SVG (*.svg)"))
-			.toStdWString());
-
 	if (filePath.extension() == L".svg")
 	{
 		QSvgGenerator svgGen;
@@ -762,6 +767,18 @@ void QtGraphicsView::exportGraph()
 	{
 		toQImage().save(QString::fromStdWString(filePath.wstr()));
 	}
+}
+
+void QtGraphicsView::exportGraph()
+{
+	FilePath filePath(
+		QtFileDialog::showSaveFileDialog(
+			nullptr,
+			QStringLiteral("Save as image, recommand format svg when image size is big"),
+			FilePath(),
+			QStringLiteral("PNG (*.png);;JPEG (*.JPEG);;BMP Files (*.bmp);;SVG (*.svg)"))
+			.toStdWString());
+	saveGraph(filePath);
 }
 
 void QtGraphicsView::copyGraph()
@@ -861,7 +878,9 @@ void QtGraphicsView::handleMessage(MessageSaveAsImage* message)
 	//if ( (message->getSchedulerId() == getSchedulerId()) && !m_imageCached.isNull() )
 	if (message->getSchedulerId() == getSchedulerId())
 	{
-		m_imageCached = toQImage();
-		m_imageCached.save(message->path);
+		
+		FilePath filepath(message->path.toStdWString());
+		saveGraph(filepath);
+		//m_imageCached.save(message->path);
 	}
 }

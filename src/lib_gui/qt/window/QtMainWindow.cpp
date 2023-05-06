@@ -716,7 +716,7 @@ void QtMainWindow::forceRefresh()
 void QtMainWindow::saveAsImage()
 {
 	QString filePath = QtFileDialog::showSaveFileDialog(
-		this, tr("Save as Image"), FilePath(), "PNG (*.png);;JPEG (*.JPEG);;BMP Files (*.bmp)");
+		this, tr("Save as Image, recommand format svg when image size is big"), FilePath(), "PNG (*.png);;JPEG (*.JPEG);;BMP Files (*.bmp);;SVG (*.svg)");
 	if (filePath.isNull())
 	{
 		return;
