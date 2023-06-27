@@ -15,6 +15,9 @@
 #include "logging.h"
 #include "utility.h"
 #include "utilitySourceGroupCxx.h"
+#include "utilityFile.h"
+#include "CompilationDatabase.h"
+
 
 SourceGroupCxxCdb::SourceGroupCxxCdb(std::shared_ptr<SourceGroupSettingsCxxCdb> settings)
 	: m_settings(settings)
@@ -75,6 +78,46 @@ std::set<FilePath> SourceGroupCxxCdb::getAllSourceFilePaths(
 	return sourceFilePaths;
 }
 
+
+std::vector<FilePath> SourceGroupCxxCdb::getIndexedPathsDerivedFromCDB() const
+{
+	std::set<FilePath> indexedHeaderPaths;
+	{
+		const FilePath cdbPath = m_settings->getCompilationDatabasePathExpandedAndAbsolute();
+		if (!cdbPath.empty() && cdbPath.exists())
+		{
+			for (const FilePath& path: IndexerCommandCxx::getSourceFilesFromCDB(cdbPath))
+			{
+				indexedHeaderPaths.insert(path.getCanonical().getParentDirectory());
+			}
+			for (const FilePath& path: utility::CompilationDatabase(cdbPath).getAllHeaderPaths())
+			{
+				if (path.exists())
+				{
+					indexedHeaderPaths.insert(path.getCanonical());
+				}
+			}
+		}
+		else
+		{
+			LOG_WARNING(
+				"Unable to fetch indexed header paths. The provided Compilation Database path does "
+				"not exist.");
+		}
+	}
+
+	std::vector<FilePath> topLevelPaths;
+	for (const FilePath& path: utility::getTopLevelPaths(indexedHeaderPaths))
+	{
+		if (path.exists())
+		{
+			topLevelPaths.push_back(path);
+		}
+	}
+
+	return topLevelPaths;
+}
+
 std::shared_ptr<IndexerCommandProvider> SourceGroupCxxCdb::getIndexerCommandProvider(
 	const RefreshInfo& info) const
 {
@@ -93,8 +136,13 @@ std::shared_ptr<IndexerCommandProvider> SourceGroupCxxCdb::getIndexerCommandProv
 
 	const std::vector<std::wstring> includePchFlags = utility::getIncludePchFlags(m_settings.get());
 
-	const std::set<FilePath> indexedHeaderPaths = utility::toSet(
+	std::set<FilePath> indexedHeaderPaths = utility::toSet(
 		m_settings->getIndexedHeaderPathsExpandedAndAbsolute());
+	if (indexedHeaderPaths.size() == 0)
+	{
+		m_settings->setIndexedHeaderPaths(getIndexedPathsDerivedFromCDB());
+		indexedHeaderPaths = utility::toSet(m_settings->getIndexedHeaderPathsExpandedAndAbsolute());
+	}
 	const std::set<FilePathFilter> excludeFilters = utility::toSet(
 		m_settings->getExcludeFiltersExpandedAndAbsolute());
 	const std::set<FilePath>& sourceFilePaths = getAllSourceFilePaths(cdb);
