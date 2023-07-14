@@ -261,7 +261,6 @@ private:
 	void buildFullTextSearchIndex() const;
 	void buildMemberEdgeIdOrderMap();
 	void buildHierarchyCache();
-	std::shared_ptr<StorageSymbol> get_symbol(Id id) const;
 
 	bool m_preIndexingErrorCountSet = false;
 	size_t m_preIndexingErrorCount = 0;
@@ -294,6 +293,7 @@ private:
 	std::vector<BaseElementPtr> m_BES;
 	std::vector<Id> m_file_ids;
 	std::vector<Id> m_node_ids;
+	std::vector<Id> m_edges_ids;
 };
 
 #endif	  // PERSISTENT_STORAGE_H

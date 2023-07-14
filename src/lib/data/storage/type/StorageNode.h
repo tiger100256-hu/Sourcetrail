@@ -40,4 +40,5 @@ public:
 	Id id;
 };
 
+using StorageNodePtr = std::shared_ptr<StorageNode>;
 #endif	  // STORAGE_NODE_H

@@ -50,4 +50,5 @@ public:
 	Id id;
 };
 
+using StorageEdgePtr = std::shared_ptr<StorageEdge>;
 #endif	  // STORAGE_EDGE_H

@@ -15,4 +15,6 @@ public:
 	uint8_t definitionKind;
 };
 
+using StorageSymbolPtr = std::shared_ptr<StorageSymbol>;
+
 #endif	  // STORAGE_SYMBOL_H

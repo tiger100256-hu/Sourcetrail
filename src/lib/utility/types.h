@@ -10,7 +10,6 @@ using BaseElementPtr = std::shared_ptr<BaseElement>;
 class BaseElement
 : public std::enable_shared_from_this<BaseElement> {
 public:
-
 	enum BE_TYPE {
 		BE_NONE = 0,
 		BE_FILE = 1 << 0,
@@ -22,6 +21,7 @@ public:
 		BE_LOCALSYMBOL  = 1 << 4,
 	} ;
 	virtual ~BaseElement() = default;
+	
 	uint8_t m_type = BE_NONE;
 	BaseElementPtr m_exBE;
 };

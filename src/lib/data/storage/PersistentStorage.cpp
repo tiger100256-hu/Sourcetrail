@@ -27,6 +27,7 @@
 #include "logging.h"
 #include "tracing.h"
 #include "utility.h"
+#include "utils.h"
 #include "utilityApp.h"
 #include <chrono>
 PersistentStorage::PersistentStorage(const FilePath& dbPath, const FilePath& bookmarkPath)
@@ -442,7 +443,7 @@ std::set<FilePath> PersistentStorage::getIncompleteFiles() const
 	std::set<FilePath> incompleteFiles;
 	if (m_fileNodeComplete.size() == 0) {
 		for (auto& id : m_file_ids) {
-			auto file = std::dynamic_pointer_cast<StorageFile>(m_BES[id]);
+			auto file = UTILS::get_file_unsafe(m_BES[id]);
 			if (file->complete == false) {
 				incompleteFiles.insert(FilePath(file->filePath));
 			}
@@ -475,7 +476,7 @@ bool PersistentStorage::getFilePathIndexed(const FilePath& path) const
 void PersistentStorage::buildCaches()
 {
 	TIME_TRACE();
-	
+
 	// the work...
 	clearCaches();
 	buildFilePathMaps();
@@ -511,7 +512,7 @@ void PersistentStorage::buildCachesNew()
 		"SELECT count(id) FROM element ;");
 	int element_num = q_elemment_num.getIntField(0, 0);
 	m_BES.resize(element_num + 1);
-	
+
 	while (!q_file.eof())
 	{
 		auto file = std::make_shared<StorageFile>();
@@ -524,8 +525,8 @@ void PersistentStorage::buildCachesNew()
 		file->complete = q_file.getIntField(5, 0);
 		const FilePath path(file->filePath);
 		 m_fileNodeIds.emplace(path, file->id);
-		 m_lowerCasefileNodeIds.emplace(path.getLowerCase(), file->id);	
-		 
+		 m_lowerCasefileNodeIds.emplace(path.getLowerCase(), file->id);
+
 		 // will remove in the future
 		 m_file_ids.push_back(file->id);
 		 //m_fileNodePaths.emplace_hint(m_fileNodePaths.end(), file->id, path);
@@ -537,7 +538,7 @@ void PersistentStorage::buildCachesNew()
 		if(!m_hasJavaFiles && path.extension() == L".java")
 		{
 			m_hasJavaFiles = true;
-		}	
+		}
 		m_BES[t_id] = file;
 		q_file.nextRow();
 	}
@@ -583,14 +584,13 @@ void PersistentStorage::buildCachesNew()
 			m_symbolIndex.addNode(node->id, std::move(name), NodeType(static_cast<NodeKind>(node->type)));
 		};
 
-		if (( m_BES[t_id]->m_type & BaseElement::BE_FILE ) == BaseElement::BE_FILE) {
-			auto file = std::dynamic_pointer_cast<StorageFile>(m_BES[t_id]);
+		if (auto file = UTILS::get_file(m_BES[t_id]); file != nullptr) {
 			if (file->indexed) {
 				FilePath path(file->filePath);
 				m_fileIndex.addNode(file->id, path.wstr(), NodeType(static_cast<NodeKind>(node->type)));
 			}
-		} else if((m_BES[t_id]->m_type & BaseElement::BE_SYMBOL) == BaseElement::BE_SYMBOL) {
-			auto symbol = std::dynamic_pointer_cast<StorageSymbol>(m_BES[t_id]);
+		}
+		else if (auto symbol = UTILS::get_symbol(m_BES[t_id]); symbol != nullptr) {
 			auto defKind = intToDefinitionKind(symbol->definitionKind);
 			if (defKind != DEFINITION_IMPLICIT)
 			{
@@ -603,13 +603,14 @@ void PersistentStorage::buildCachesNew()
 		}
 		q_node.nextRow();
 	}
-	
-	
+
+
 	m_symbolIndex.finishSetup();
 	m_fileIndex.finishSetup();
 
 	buildMemberEdgeIdOrderMap();
-	// buildHierarchyCache();
+	//buildHierarchyCache();
+
 	CppSQLite3Query q_edge = m_sqliteIndexStorage.executeQuery(
 		"SELECT id, type, source_node_id, target_node_id FROM edge ;");
 
@@ -623,27 +624,36 @@ void PersistentStorage::buildCachesNew()
 	    edge->targetNodeId = q_edge.getIntField(3, 0);
 		// m_BES[edge->id] = edge;
 		if (edge->type == Edge::typeToInt(Edge::EDGE_MEMBER)) {
-			if ((m_BES[edge->sourceNodeId]->m_type & BaseElement::BS_NS) == BaseElement::BS_NS &&
-				(m_BES[edge->targetNodeId]->m_type & BaseElement::BS_NS) == BaseElement::BS_NS) {
-				auto sourceNode = std::dynamic_pointer_cast<StorageNode>(m_BES[edge->sourceNodeId]->m_exBE);
-				auto sourceSymbol = std::dynamic_pointer_cast<StorageSymbol>(m_BES[edge->sourceNodeId]);
-				auto targetSymbol = std::dynamic_pointer_cast<StorageSymbol>(m_BES[edge->targetNodeId]);
+			bool sourceIsVisible = true;
+			if (auto sourceNode = UTILS::get_node(m_BES[edge->sourceNodeId]); sourceNode != nullptr) {
 				nodetype.setKind(static_cast<NodeKind>(sourceNode->type));
-				m_hierarchyCache.createConnection(
-					edge->id,
-					edge->sourceNodeId,
-					edge->targetNodeId,
-					nodetype.isVisibleAsParentInGraph(),
-					intToDefinitionKind(sourceSymbol->definitionKind) == DEFINITION_IMPLICIT,
-					intToDefinitionKind(targetSymbol->definitionKind) == DEFINITION_IMPLICIT);
+				sourceIsVisible = nodetype.isVisibleAsParentInGraph();
 			}
+			bool sourceIsImplicit = false;
+			if (auto sourceSymbol = UTILS::get_symbol(m_BES[edge->sourceNodeId]); sourceSymbol != nullptr) {
+				sourceIsImplicit = intToDefinitionKind(sourceSymbol->definitionKind) == DEFINITION_IMPLICIT;
+			}
+			bool targetIsImplicit = false;
+			if (auto targetSymbol = UTILS::get_symbol(m_BES[edge->targetNodeId]); targetSymbol != nullptr) {
+				targetIsImplicit = intToDefinitionKind(targetSymbol->definitionKind) == DEFINITION_IMPLICIT;
+			}
+			m_hierarchyCache.createConnection(
+				edge->id,
+				edge->sourceNodeId,
+				edge->targetNodeId,
+				sourceIsVisible,
+				sourceIsImplicit,
+				targetIsImplicit);
+
 			m_BES[edge->id] = edge;
 		} else if (edge->type == Edge::typeToInt(Edge::EDGE_INHERITANCE)) {
 			m_hierarchyCache.createInheritance(edge->id, edge->sourceNodeId, edge->targetNodeId);
 			m_BES[edge->id] = edge;
 		}
+		m_edges_ids.push_back(edge->id);
 		q_edge.nextRow();
 	}
+
 }
 
 void PersistentStorage::optimizeMemory()
@@ -1058,13 +1068,13 @@ std::vector<SearchMatch> PersistentStorage::getAutocompletionSymbolMatches(
 		bool is_not_symbol = true;
 		if (m_symbolDefinitionKinds.size() == 0)
 		{
-			auto symbol = get_symbol(firstNode->id);
+			auto symbol = UTILS::get_symbol(m_BES[firstNode->id]);
 			is_not_symbol = symbol.get() == nullptr;
 		}
 		else {
 			is_not_symbol = m_symbolDefinitionKinds.find(firstNode->id) == m_symbolDefinitionKinds.end();
 		}
-	
+
 		if (is_not_symbol)
 		{
 			match.typeName = L"non-indexed " + match.typeName;
@@ -1216,23 +1226,18 @@ std::shared_ptr<Graph> PersistentStorage::getGraphForAll() const
 	{
 		for (auto& id: m_node_ids)
 		{
-			auto node = std::dynamic_pointer_cast<StorageNode>(m_BES[id]->m_exBE);
+			auto node = UTILS::get_node_unsafe(m_BES[id]);
 			const NodeType type(intToNodeKind(node->type));
-			if ((m_BES[id]->m_type & BaseElement::BE_FILE) == BaseElement::BE_FILE)
+			if (auto file = UTILS::get_file(m_BES[id]); file != nullptr && file->indexed)
 			{
-				auto file = std::dynamic_pointer_cast<StorageFile>(m_BES[id]);		
-				if (file->indexed)
-				{
-					addFileNodeToGraph(*(node.get()), graph.get());
-				}
+				addFileNodeToGraph(*(node.get()), graph.get());
 			}
 			else {
 				bool showNode = true;
-				if ((m_BES[id]->m_type & BaseElement::BE_SYMBOL) == BaseElement::BE_SYMBOL) {
-					auto symbol = std::dynamic_pointer_cast<StorageSymbol>(m_BES[id]);	
+				if (auto symbol = UTILS::get_symbol(m_BES[id]); symbol != nullptr) {
 					showNode = symbol->definitionKind == DEFINITION_EXPLICIT;
 				}
-				if (showNode && (type.isPackage() || !m_hierarchyCache.isChildOfVisibleNodeOrInvisible(node->id))) {
+				if (showNode && (type.isPackage() || !m_hierarchyCache.isChildOfVisibleNodeOrInvisible(id))) {
 					addNodeToGraph(*(node.get()), type, graph.get(), false);
 				}
 			}
@@ -1273,14 +1278,14 @@ std::shared_ptr<Graph> PersistentStorage::getGraphForNodeTypes(NodeTypeSet nodeT
 	TIME_TRACE();
 
 	std::vector<Id> tokenIds;
-	if (m_symbolDefinitionKinds.size() == 0 || m_fileNodePaths.size() == 0) 
+	if (m_symbolDefinitionKinds.size() == 0 || m_fileNodePaths.size() == 0)
 	{
 		for (auto& item : m_node_ids) {
-			if ((m_BES[item]->m_type & BaseElement::BS_NS) == BaseElement::BS_NS) {
-				auto node = std::dynamic_pointer_cast<StorageNode>(m_BES[item]->m_exBE);
+			if (UTILS::is_symbol_node(m_BES[item])) {
+				auto node = UTILS::get_node_unsafe(m_BES[item]);
 				if (nodeTypes.contains(NodeType(intToNodeKind(node->type))))
 				{
-					auto symbol = std::dynamic_pointer_cast<StorageSymbol>(m_BES[item]->m_exBE);
+					auto symbol = UTILS::get_symbol_unsafe(m_BES[item]);
 					if (symbol->definitionKind == DEFINITION_EXPLICIT) {
 						tokenIds.push_back(item);
 					}
@@ -1340,7 +1345,16 @@ std::shared_ptr<Graph> PersistentStorage::getGraphForActiveTokenIds(
 	if (tokenIds.size() == 1)
 	{
 		const Id elementId = tokenIds[0];
-		const StorageNode node = m_sqliteIndexStorage.getFirstById<StorageNode>(elementId);
+		StorageNode node;
+		if (m_node_ids.size() > 0) {
+			auto nodeptr = UTILS::get_node(m_BES[elementId]);
+			if (nodeptr != nullptr) {
+				node = *(nodeptr.get());
+			}
+		}
+		else {
+			 node = m_sqliteIndexStorage.getFirstById<StorageNode>(elementId);
+		}
 
 		if (node.id > 0)
 		{
@@ -1366,41 +1380,88 @@ std::shared_ptr<Graph> PersistentStorage::getGraphForActiveTokenIds(
 				nodeIds.push_back(elementId);
 				edgeIds.clear();
 
-				for (const StorageEdge& edge:
-					 m_sqliteIndexStorage.getEdgesBySourceOrTargetId(elementId))
+				if (m_edges_ids.size() > 0)
 				{
-					Edge::EdgeType edgeType = Edge::intToType(edge.type);
-					if (edgeType == Edge::EDGE_MEMBER)
+					for (auto& id:m_edges_ids)
 					{
-						continue;
+						auto edge = UTILS::get_edge_unsafe(m_BES[id]);
+						if (edge->sourceNodeId != elementId && edge->targetNodeId != elementId) {
+							continue;
+						}
+						Edge::EdgeType edgeType = Edge::intToType(edge->type);
+						if (edgeType == Edge::EDGE_MEMBER)
+						{
+							continue;
+						}
+
+						if (nodeType.isUsable() && (edgeType & Edge::EDGE_TYPE_USAGE) &&
+							m_hierarchyCache.isChildOfVisibleNodeOrInvisible(edge->sourceNodeId) &&
+							(m_hierarchyCache.getLastVisibleParentNodeId(edge->targetNodeId) !=
+							 m_hierarchyCache.getLastVisibleParentNodeId(edge->sourceNodeId)))
+						{
+							edgesToBundle.push_back(*(edge.get()));
+						}
+						else
+						{
+							edgeIds.push_back(edge->id);
+						}
 					}
 
-					if (nodeType.isUsable() && (edgeType & Edge::EDGE_TYPE_USAGE) &&
-						m_hierarchyCache.isChildOfVisibleNodeOrInvisible(edge.sourceNodeId) &&
-						(m_hierarchyCache.getLastVisibleParentNodeId(edge.targetNodeId) !=
-						 m_hierarchyCache.getLastVisibleParentNodeId(edge.sourceNodeId)))
+					if (nodeType.isFile())
 					{
-						edgesToBundle.push_back(edge);
+						addFileContents = true;
 					}
 					else
 					{
-						edgeIds.push_back(edge.id);
+						addBundledEdges = true;
 					}
-				}
-
-				if (nodeType.isFile())
-				{
-					addFileContents = true;
 				}
 				else
 				{
-					addBundledEdges = true;
+					for (const StorageEdge& edge:
+						 m_sqliteIndexStorage.getEdgesBySourceOrTargetId(elementId))
+					{
+						Edge::EdgeType edgeType = Edge::intToType(edge.type);
+						if (edgeType == Edge::EDGE_MEMBER)
+						{
+							continue;
+						}
+
+						if (nodeType.isUsable() && (edgeType & Edge::EDGE_TYPE_USAGE) &&
+							m_hierarchyCache.isChildOfVisibleNodeOrInvisible(edge.sourceNodeId) &&
+							(m_hierarchyCache.getLastVisibleParentNodeId(edge.targetNodeId) !=
+							 m_hierarchyCache.getLastVisibleParentNodeId(edge.sourceNodeId)))
+						{
+							edgesToBundle.push_back(edge);
+						}
+						else
+						{
+							edgeIds.push_back(edge.id);
+						}
+					}
+
+					if (nodeType.isFile())
+					{
+						addFileContents = true;
+					}
+					else
+					{
+						addBundledEdges = true;
+					}
 				}
 			}
 		}
-		else if (m_sqliteIndexStorage.isEdge(elementId))
+		else
 		{
-			edgeIds.push_back(elementId);
+			if (m_edges_ids.size() > 0) {
+				if (UTILS::is_edge(m_BES[elementId])) {
+					edgeIds.push_back(elementId);
+				}
+			}
+			else {
+				if (m_sqliteIndexStorage.isEdge(elementId))
+					edgeIds.push_back(elementId);
+			}
 		}
 	}
 
@@ -1618,36 +1679,32 @@ std::shared_ptr<Graph> PersistentStorage::getGraphForTrail(
 					if (!nodeNonIndexed)
 					{
 						if (kind == NODE_FILE)
-						{	
+						{
 							if (m_fileNodeIndexed.size() == 0)
 							{
-								if ((m_BES[node.id]->m_type & BaseElement::BE_FILE) ==
-									BaseElement::BE_FILE)
+								if (auto file = UTILS::get_file(m_BES[node.id]); file != nullptr && file->indexed)
 								{
-									auto file = std::dynamic_pointer_cast<StorageFile>(m_BES[node.id]);
-									if (!file->indexed)
-									{
-										continue;
-									}
 								}
 								else
 								{
 									continue;
 								}
 							}
-					
-							auto it = m_fileNodeIndexed.find(node.id);
-							if (it == m_fileNodeIndexed.end() || !it->second)
-							{
-								continue;
+							else {
+								auto it = m_fileNodeIndexed.find(node.id);
+								if (it == m_fileNodeIndexed.end() || !it->second)
+								{
+									continue;
+								}
 							}
+
 						}
 						else
 						{
-							
+
 							if (m_symbolDefinitionKinds.size() == 0)
 							{
-								auto symbol = get_symbol(node.id);
+								auto symbol = UTILS::get_symbol(m_BES[node.id]);
 								if (symbol == nullptr || symbol->definitionKind == DEFINITION_NONE)
 								{
 									continue;
@@ -1660,7 +1717,7 @@ std::shared_ptr<Graph> PersistentStorage::getGraphForTrail(
 								{
 									continue;
 								}
-							}									
+							}
 						}
 					}
 
@@ -1836,7 +1893,7 @@ std::vector<Id> PersistentStorage::getNodeIdsForLocationIds(const std::vector<Id
 
 		bool is_mplict = false;
 		if (m_symbolDefinitionKinds.size() == 0) {
-			auto symbol = get_symbol(elementId);
+			auto symbol = UTILS::get_symbol(m_BES[elementId]);
 			is_mplict = symbol != nullptr && symbol->definitionKind  == DEFINITION_IMPLICIT;
 		}
 		else {
@@ -1873,16 +1930,16 @@ std::shared_ptr<SourceLocationCollection> PersistentStorage::getSourceLocationsF
 	for (const Id tokenId: tokenIds)
 	{
 		FilePath path = getFileNodePath(tokenId);
-		
+
 		bool is_symbol = true;
 		if (m_symbolDefinitionKinds.size() == 0) {
-			auto symbol = get_symbol(tokenId);
+			auto symbol = UTILS::get_symbol(m_BES[tokenId]);
 			is_symbol = symbol == nullptr;
 		}
 		else {
 			is_symbol = m_symbolDefinitionKinds.find(tokenId) == m_symbolDefinitionKinds.end();
 		}
-		
+
 		// check for non-indexed file
 		if (path.empty() && is_symbol)
 		{
@@ -2877,10 +2934,10 @@ FilePath PersistentStorage::getFileNodePath(Id fileId) const
 		LOG_ERROR("No file id set");
 		return FilePath();
 	}
-	
+
 	if (m_fileNodePaths.size() == 0) {
-		if (m_BES[fileId].get() && (m_BES[fileId]->m_type & BaseElement::BE_FILE) == BaseElement::BE_FILE) {
-			auto file = std::dynamic_pointer_cast<StorageFile>(m_BES[fileId]);
+		if (auto file = UTILS::get_file(m_BES[fileId]); file != nullptr)
+		{
 			return FilePath(file->filePath);
 		}
 		return FilePath();
@@ -2898,10 +2955,9 @@ FilePath PersistentStorage::getFileNodePath(Id fileId) const
 bool PersistentStorage::getFileNodeComplete(Id fileId) const
 {
 	if (m_fileNodeComplete.size() == 0) {
-		if ((m_BES[fileId]->m_type & BaseElement::BE_FILE) == BaseElement::BE_FILE) {
-			auto file = std::dynamic_pointer_cast<StorageFile>(m_BES[fileId]);
+		if (auto file = UTILS::get_file(m_BES[fileId]); file != nullptr) {
 			return file->complete;
-		}		
+		}
 		return false;
 	}
 	auto it = m_fileNodeComplete.find(fileId);
@@ -2917,9 +2973,8 @@ bool PersistentStorage::getFileNodeIndexed(Id fileId) const
 {
 	if (m_fileNodeIndexed.size() == 0)
 	{
-		if ((m_BES[fileId]->m_type & BaseElement::BE_FILE) == BaseElement::BE_FILE)
+		if (auto file = UTILS::get_file(m_BES[fileId]); file != nullptr)
 		{
-			auto file = std::dynamic_pointer_cast<StorageFile>(m_BES[fileId]);
 			return file->indexed;
 		}
 		return false;
@@ -2938,9 +2993,8 @@ std::wstring PersistentStorage::getFileNodeLanguage(Id fileId) const
 
 	if (m_fileNodeLanguage.size() == 0)
 	{
-		if ((m_BES[fileId]->m_type & BaseElement::BE_FILE) == BaseElement::BE_FILE)
+		if (auto file = UTILS::get_file(m_BES[fileId]); file != nullptr)
 		{
-			auto file = std::dynamic_pointer_cast<StorageFile>(m_BES[fileId]);
 			return file->languageIdentifier;
 		}
 		return L"";
@@ -3184,16 +3238,6 @@ void PersistentStorage::addFileNodeToGraph(const StorageNode& storageNode, Graph
 	node->addComponent(std::make_shared<TokenComponentFilePath>(filePath, complete));
 }
 
-std::shared_ptr<StorageSymbol> PersistentStorage::get_symbol(Id id) const
-{
-	if (m_BES[id].get() &&
-			(m_BES[id]->m_type & BaseElement::BE_SYMBOL) == BaseElement::BE_SYMBOL)
-	{
-			return std::dynamic_pointer_cast<StorageSymbol>(m_BES[id]);	
-	}
-	return nullptr;
-}
-
 void PersistentStorage::addNodeToGraph(
 	const StorageNode& newNode, const NodeType& type, Graph* graph, bool addChildCount) const
 {
@@ -3202,7 +3246,7 @@ void PersistentStorage::addNodeToGraph(
 
 	if (m_symbolDefinitionKinds.size() == 0)
 	{
-		auto symbol = get_symbol(newNode.id);
+		auto symbol = UTILS::get_symbol(m_BES[newNode.id]);
 		if (symbol.get() != nullptr) {
 			defKind = intToDefinitionKind(symbol->definitionKind);
 		}
@@ -3424,23 +3468,23 @@ void PersistentStorage::addFileContentsToGraph(Id fileId, Graph* graph) const
 			if (tokenIdsSet.insert(tokenId).second)
 			{
 				if (m_symbolDefinitionKinds.size() == 0) {
-					if (m_BES[tokenId].get() &&
-						(m_BES[tokenId]->m_type & BaseElement::BE_SYMBOL) == BaseElement::BE_SYMBOL)
+					if (auto symbol = UTILS::get_symbol(m_BES[tokenId]);
+						symbol != nullptr && symbol->definitionKind == DEFINITION_EXPLICIT)
 					{
-						auto symbol = std::dynamic_pointer_cast<StorageSymbol>(m_BES[tokenId]);
-						if(symbol->definitionKind != DEFINITION_EXPLICIT)
-							tokenIds.push_back(tokenId);
 					}
-					else {
+					else
+					{
 						tokenIds.push_back(tokenId);
 					}
 				}
-				
-				auto it = m_symbolDefinitionKinds.find(tokenId);
-				if (it == m_symbolDefinitionKinds.end() || it->second != DEFINITION_IMPLICIT)
-				{
-					tokenIds.push_back(tokenId);
+				else {
+					auto it = m_symbolDefinitionKinds.find(tokenId);
+					if (it == m_symbolDefinitionKinds.end() || it->second != DEFINITION_IMPLICIT)
+					{
+						tokenIds.push_back(tokenId);
+					}
 				}
+
 			}
 		}
 	});

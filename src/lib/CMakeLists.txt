@@ -276,6 +276,7 @@ add_files(
 	data/storage/type/StorageOccurrence.h
 	data/storage/type/StorageSourceLocation.h
 	data/storage/type/StorageSymbol.h
+	data/storage/type/utils.h
 
 	data/storage/IntermediateStorage.cpp
 	data/storage/IntermediateStorage.h
@@ -291,6 +292,7 @@ add_files(
 	data/storage/StorageProvider.cpp
 	data/storage/StorageProvider.h
 	data/storage/StorageStats.h
+	data/storage/utils.cpp
 
 	data/tooltip/TooltipInfo.h
 	data/tooltip/TooltipOrigin.h

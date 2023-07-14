@@ -48,5 +48,6 @@ public:
 	bool indexed;
 	bool complete;
 };
+using StorageFilePtr = std::shared_ptr<StorageFile>;
 
 #endif	  // STORAGE_FILE_H
