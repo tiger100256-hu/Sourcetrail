@@ -282,6 +282,7 @@ public:
     virtual ~CppSQLite3DB();
 
     void open(const char* szFile);
+	void openInMemory(const char* szFile);
 
     void close();
 

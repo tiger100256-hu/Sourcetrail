@@ -131,7 +131,7 @@ ScopedTrace<TracerType>::~ScopedTrace()
 	TracerType::getInstance()->finishEvent(m_event);
 }
 
-
+#define TRACING_ENABLED 0
 #ifdef TRACING_ENABLED
 #	ifdef USE_ACCUMULATED_TRACING
 #		define TRACE(__name__)                                                                    \
@@ -151,5 +151,7 @@ ScopedTrace<TracerType>::~ScopedTrace()
 #	define TRACE(__name__)
 #	define PRINT_TRACES()
 #endif
+
+#define TIME_TRACE() TRACE("time")
 
 #endif	  // TRACING_H

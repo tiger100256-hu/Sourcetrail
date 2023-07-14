@@ -12,7 +12,7 @@ public:
 		std::sort(m_edgeIds.begin(), m_edgeIds.end());
 	}
 
-	TestEdge(std::tuple<Id, Id, std::vector<size_t>> tuple)
+	TestEdge(std::tuple<Id, Id, std::vector<Id>> tuple)
 		: m_sourceId(std::get<0>(tuple))
 		, m_targetId(std::get<1>(tuple))
 		, m_edgeIds(std::get<2>(tuple))
@@ -40,7 +40,7 @@ std::vector<std::string> getSerializedInheritanceEdges(
 	HierarchyCache& cache, Id nodeId, std::set<Id> nodeIds)
 {
 	std::vector<std::string> inheritanceEdges;
-	for (const std::tuple<Id, Id, std::vector<size_t>>& edge:
+	for (const std::tuple<Id, Id, std::vector<Id>>& edge:
 		 cache.getInheritanceEdgesForNodeId(nodeId, nodeIds))
 	{
 		inheritanceEdges.push_back(TestEdge(edge).toString());

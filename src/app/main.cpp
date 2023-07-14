@@ -27,6 +27,7 @@
 #include "UserPaths.h"
 #include "Version.h"
 #include "logging.h"
+#include "tracing.h"
 #include "productVersion.h"
 #include "utility.h"
 #include "utilityApp.h"
@@ -219,6 +220,8 @@ int main(int argc, char* argv[])
 			MessageLoadProject(commandLineParser.getProjectFilePath(), false, REFRESH_NONE).dispatch();
 		}
 
-		return qtApp.exec();
+		auto result = qtApp.exec();
+		PRINT_TRACES();
+		return result;
 	}
 }

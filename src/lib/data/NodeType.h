@@ -55,6 +55,7 @@ public:
 	bool operator<(const NodeType& o) const;
 
 	NodeKind getKind() const;
+	void NodeType::setKind(NodeKind kind);
 
 	Id getId() const;
 	bool isFile() const;

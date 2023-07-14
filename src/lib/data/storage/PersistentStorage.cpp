@@ -28,7 +28,7 @@
 #include "tracing.h"
 #include "utility.h"
 #include "utilityApp.h"
-
+#include <chrono>
 PersistentStorage::PersistentStorage(const FilePath& dbPath, const FilePath& bookmarkPath)
 	: m_sqliteIndexStorage(dbPath), m_sqliteBookmarkStorage(bookmarkPath)
 {
@@ -368,7 +368,7 @@ void PersistentStorage::clearCaches()
 
 std::set<FilePath> PersistentStorage::getReferenced(const std::set<FilePath>& filePaths) const
 {
-	TRACE();
+	TIME_TRACE();
 	std::set<FilePath> referenced;
 
 	utility::append(referenced, getReferencedByIncludes(filePaths));
@@ -379,7 +379,7 @@ std::set<FilePath> PersistentStorage::getReferenced(const std::set<FilePath>& fi
 
 std::set<FilePath> PersistentStorage::getReferencing(const std::set<FilePath>& filePaths) const
 {
-	TRACE();
+	TIME_TRACE();
 	std::set<FilePath> referencing;
 
 	utility::append(referencing, getReferencingByIncludes(filePaths));
@@ -390,7 +390,7 @@ std::set<FilePath> PersistentStorage::getReferencing(const std::set<FilePath>& f
 
 void PersistentStorage::clearAllErrors()
 {
-	TRACE();
+	TIME_TRACE();
 
 	m_sqliteIndexStorage.removeAllErrors();
 }
@@ -398,7 +398,7 @@ void PersistentStorage::clearAllErrors()
 void PersistentStorage::clearFileElements(
 	const std::vector<FilePath>& filePaths, std::function<void(int)> updateStatusCallback)
 {
-	TRACE();
+	TIME_TRACE();
 
 	std::vector<Id> fileNodeIds;
 	for (const StorageFile& file: m_sqliteIndexStorage.getFilesByPaths(filePaths))
@@ -418,11 +418,11 @@ void PersistentStorage::clearFileElements(
 
 std::vector<FileInfo> PersistentStorage::getFileInfoForAllFiles() const
 {
-	TRACE();
+	TIME_TRACE();
 
 	std::vector<FileInfo> fileInfos;
 
-	m_sqliteIndexStorage.forEach<StorageFile>([&](StorageFile&& file) {
+	m_sqliteIndexStorage.forEach<StorageFile>([&](StorageFile& file) {
 		boost::posix_time::ptime modificationTime = boost::posix_time::not_a_date_time;
 		if (file.modificationTime != "not-a-date-time")
 		{
@@ -437,9 +437,19 @@ std::vector<FileInfo> PersistentStorage::getFileInfoForAllFiles() const
 
 std::set<FilePath> PersistentStorage::getIncompleteFiles() const
 {
-	TRACE();
+	TIME_TRACE();
 
 	std::set<FilePath> incompleteFiles;
+	if (m_fileNodeComplete.size() == 0) {
+		for (auto& id : m_file_ids) {
+			auto file = std::dynamic_pointer_cast<StorageFile>(m_BES[id]);
+			if (file->complete == false) {
+				incompleteFiles.insert(FilePath(file->filePath));
+			}
+		}
+		return incompleteFiles;
+	}
+
 	for (auto p: m_fileNodeComplete)
 	{
 		if (p.second == false)
@@ -464,23 +474,184 @@ bool PersistentStorage::getFilePathIndexed(const FilePath& path) const
 
 void PersistentStorage::buildCaches()
 {
-	TRACE();
-
+	TIME_TRACE();
+	
+	// the work...
 	clearCaches();
-
 	buildFilePathMaps();
-	buildSearchIndex();
+	std::vector<std::shared_ptr<std::thread>> threads;
+	std::shared_ptr<std::thread> thread1 = std::make_shared<std::thread>([this]()
+																		 { buildSearchIndex(); });
+	std::shared_ptr<std::thread> thread2 = std::make_shared<std::thread>([this](){
+		buildMemberEdgeIdOrderMap();});
+	std::shared_ptr<std::thread> thread3 = std::make_shared<std::thread>([this]()
+																		 { buildHierarchyCache(); });
+	threads.emplace_back(thread1);
+	thread1->join();
+	threads.emplace_back(thread2);
+	thread2->join();
+	threads.emplace_back(thread3);
+    thread3->join();
+	for (std::shared_ptr<std::thread> thread: threads)
+	{
+		thread->join();
+	}
+}
+
+void PersistentStorage::buildCachesNew()
+{
+	TIME_TRACE();
+	CppSQLite3Query q_file = m_sqliteIndexStorage.executeQuery(
+		"SELECT id, path, language, modification_time, indexed, complete FROM file ;");
+	CppSQLite3Query q_node = m_sqliteIndexStorage.executeQuery(
+		"SELECT id, type, serialized_name FROM node ;");
+	CppSQLite3Query q_symbol = m_sqliteIndexStorage.executeQuery(
+		"SELECT id, definition_kind FROM symbol ;");
+	CppSQLite3Query q_elemment_num = m_sqliteIndexStorage.executeQuery(
+		"SELECT count(id) FROM element ;");
+	int element_num = q_elemment_num.getIntField(0, 0);
+	m_BES.resize(element_num + 1);
+	
+	while (!q_file.eof())
+	{
+		auto file = std::make_shared<StorageFile>();
+		int t_id = q_file.getIntField(0, 0);
+		file->id = t_id;
+		file->filePath = utility::decodeFromUtf8(q_file.getStringField(1, ""));
+		file->languageIdentifier = utility::decodeFromUtf8(q_file.getStringField(2, ""));
+		file->modificationTime = q_file.getStringField(3, "");
+		file->indexed = q_file.getIntField(4, 0);
+		file->complete = q_file.getIntField(5, 0);
+		const FilePath path(file->filePath);
+		 m_fileNodeIds.emplace(path, file->id);
+		 m_lowerCasefileNodeIds.emplace(path.getLowerCase(), file->id);	
+		 
+		 // will remove in the future
+		 m_file_ids.push_back(file->id);
+		 //m_fileNodePaths.emplace_hint(m_fileNodePaths.end(), file->id, path);
+		 // m_fileNodeComplete.emplace_hint(m_fileNodeComplete.end(), file->id, file->complete);
+		 // m_fileNodeIndexed.emplace_hint(m_fileNodeIndexed.end(), file->id, file->indexed);
+		 // m_fileNodeLanguage.emplace_hint(m_fileNodeLanguage.end(), file->id, file->languageIdentifier);
+		 //
+
+		if(!m_hasJavaFiles && path.extension() == L".java")
+		{
+			m_hasJavaFiles = true;
+		}	
+		m_BES[t_id] = file;
+		q_file.nextRow();
+	}
+
+	while (!q_symbol.eof() ){
+		auto symbol = std::make_shared<StorageSymbol>();
+		symbol->id = q_symbol.getIntField(0, 0);;
+		symbol->definitionKind = q_symbol.getIntField(1, 0);
+		// need to remove it in the future
+		/*m_symbolDefinitionKinds.emplace_hint(
+						m_symbolDefinitionKinds.end(),
+						symbol->id,
+						intToDefinitionKind(symbol->definitionKind));*/
+		m_BES[symbol->id] = symbol;
+		q_symbol.nextRow();
+	}
+
+	while (!q_node.eof()) {
+		auto t_id = q_node.getIntField(0, 0);
+		if (!m_BES[t_id].get()) {
+			m_BES[t_id] = std::make_shared<BaseElement>();
+		}
+		auto node = std::make_shared<StorageNode>();
+		node->id = q_node.getIntField(0, 0);
+		m_node_ids.push_back(node->id);
+		node->type = q_node.getIntField(1, -1);
+		node->serializedName = utility::decodeFromUtf8(q_node.getStringField(2, ""));
+		m_BES[t_id]->m_exBE = node;
+		m_BES[t_id]->m_type = m_BES[t_id]->m_type | BaseElement::BE_NODE;
+		auto symobolIndexFunc = [this, &node](DefinitionKind defKind) {
+			const NameHierarchy nameHierarchy = NameHierarchy::deserialize(
+				node->serializedName);
+			// we don't use the signature here, so elements with the same signature share
+			// the same node.
+			std::wstring name = nameHierarchy.getQualifiedName();
+			// replace template arguments with .. to avoid clutter in search results and
+			// have different template specializations share the same node.
+			if (defKind == DEFINITION_NONE &&
+				nameHierarchy.getDelimiter() == nameDelimiterTypeToString(NAME_DELIMITER_CXX))
+			{
+				name = utility::replaceBetween(name, L'<', L'>', L"..");
+			}
+			m_symbolIndex.addNode(node->id, std::move(name), NodeType(static_cast<NodeKind>(node->type)));
+		};
+
+		if (( m_BES[t_id]->m_type & BaseElement::BE_FILE ) == BaseElement::BE_FILE) {
+			auto file = std::dynamic_pointer_cast<StorageFile>(m_BES[t_id]);
+			if (file->indexed) {
+				FilePath path(file->filePath);
+				m_fileIndex.addNode(file->id, path.wstr(), NodeType(static_cast<NodeKind>(node->type)));
+			}
+		} else if((m_BES[t_id]->m_type & BaseElement::BE_SYMBOL) == BaseElement::BE_SYMBOL) {
+			auto symbol = std::dynamic_pointer_cast<StorageSymbol>(m_BES[t_id]);
+			auto defKind = intToDefinitionKind(symbol->definitionKind);
+			if (defKind != DEFINITION_IMPLICIT)
+			{
+				symobolIndexFunc(defKind);
+			}
+		}
+		else {
+			auto defKind = DEFINITION_NONE;
+			symobolIndexFunc(defKind);
+		}
+		q_node.nextRow();
+	}
+	
+	
+	m_symbolIndex.finishSetup();
+	m_fileIndex.finishSetup();
+
 	buildMemberEdgeIdOrderMap();
-	buildHierarchyCache();
+	// buildHierarchyCache();
+	CppSQLite3Query q_edge = m_sqliteIndexStorage.executeQuery(
+		"SELECT id, type, source_node_id, target_node_id FROM edge ;");
+
+	NodeType nodetype(NODE_SYMBOL);
+	while (!q_edge.eof())
+	{
+	    auto edge = std::make_shared<StorageEdge>();
+		edge->id = q_edge.getIntField(0, 0);
+		edge->type = q_edge.getIntField(1, -1);
+		edge->sourceNodeId = q_edge.getIntField(2, 0);
+	    edge->targetNodeId = q_edge.getIntField(3, 0);
+		// m_BES[edge->id] = edge;
+		if (edge->type == Edge::typeToInt(Edge::EDGE_MEMBER)) {
+			if ((m_BES[edge->sourceNodeId]->m_type & BaseElement::BS_NS) == BaseElement::BS_NS &&
+				(m_BES[edge->targetNodeId]->m_type & BaseElement::BS_NS) == BaseElement::BS_NS) {
+				auto sourceNode = std::dynamic_pointer_cast<StorageNode>(m_BES[edge->sourceNodeId]->m_exBE);
+				auto sourceSymbol = std::dynamic_pointer_cast<StorageSymbol>(m_BES[edge->sourceNodeId]);
+				auto targetSymbol = std::dynamic_pointer_cast<StorageSymbol>(m_BES[edge->targetNodeId]);
+				nodetype.setKind(static_cast<NodeKind>(sourceNode->type));
+				m_hierarchyCache.createConnection(
+					edge->id,
+					edge->sourceNodeId,
+					edge->targetNodeId,
+					nodetype.isVisibleAsParentInGraph(),
+					intToDefinitionKind(sourceSymbol->definitionKind) == DEFINITION_IMPLICIT,
+					intToDefinitionKind(targetSymbol->definitionKind) == DEFINITION_IMPLICIT);
+			}
+			m_BES[edge->id] = edge;
+		} else if (edge->type == Edge::typeToInt(Edge::EDGE_INHERITANCE)) {
+			m_hierarchyCache.createInheritance(edge->id, edge->sourceNodeId, edge->targetNodeId);
+			m_BES[edge->id] = edge;
+		}
+		q_edge.nextRow();
+	}
 }
 
 void PersistentStorage::optimizeMemory()
 {
-	TRACE();
+	TIME_TRACE();
 
 	m_sqliteIndexStorage.setTime();
 	m_sqliteIndexStorage.optimizeMemory();
-
 	m_sqliteBookmarkStorage.optimizeMemory();
 }
 
@@ -511,7 +682,7 @@ std::vector<Id> PersistentStorage::getNodeIdsForNameHierarchies(
 
 NameHierarchy PersistentStorage::getNameHierarchyForNodeId(Id nodeId) const
 {
-	TRACE();
+	TIME_TRACE();
 
 	return NameHierarchy::deserialize(
 		m_sqliteIndexStorage.getFirstById<StorageNode>(nodeId).serializedName);
@@ -520,7 +691,7 @@ NameHierarchy PersistentStorage::getNameHierarchyForNodeId(Id nodeId) const
 std::vector<NameHierarchy> PersistentStorage::getNameHierarchiesForNodeIds(
 	const std::vector<Id>& nodeIds) const
 {
-	TRACE();
+	TIME_TRACE();
 
 	std::vector<NameHierarchy> nameHierarchies;
 	for (const StorageNode& storageNode: m_sqliteIndexStorage.getAllByIds<StorageNode>(nodeIds))
@@ -589,7 +760,7 @@ StorageEdge PersistentStorage::getEdgeById(Id edgeId) const
 std::shared_ptr<SourceLocationCollection> PersistentStorage::getFullTextSearchLocations(
 	const std::wstring& searchTerm, bool caseSensitive) const
 {
-	TRACE();
+	TIME_TRACE();
 
 	std::shared_ptr<SourceLocationCollection> collection =
 		std::make_shared<SourceLocationCollection>();
@@ -711,7 +882,7 @@ std::shared_ptr<SourceLocationCollection> PersistentStorage::getFullTextSearchLo
 std::vector<SearchMatch> PersistentStorage::getAutocompletionMatches(
 	const std::wstring& query, NodeTypeSet acceptedNodeTypes, bool acceptCommands) const
 {
-	TRACE();
+	TIME_TRACE();
 
 	// search in indices
 	const size_t maxResultsCount = static_cast<size_t>(std::pow(3, query.size() + 3));
@@ -884,7 +1055,17 @@ std::vector<SearchMatch> PersistentStorage::getAutocompletionSymbolMatches(
 		match.typeName = match.nodeType.getReadableTypeWString();
 		match.searchType = SearchMatch::SEARCH_TOKEN;
 
-		if (m_symbolDefinitionKinds.find(firstNode->id) == m_symbolDefinitionKinds.end())
+		bool is_not_symbol = true;
+		if (m_symbolDefinitionKinds.size() == 0)
+		{
+			auto symbol = get_symbol(firstNode->id);
+			is_not_symbol = symbol.get() == nullptr;
+		}
+		else {
+			is_not_symbol = m_symbolDefinitionKinds.find(firstNode->id) == m_symbolDefinitionKinds.end();
+		}
+	
+		if (is_not_symbol)
 		{
 			match.typeName = L"non-indexed " + match.typeName;
 		}
@@ -933,9 +1114,9 @@ std::vector<SearchMatch> PersistentStorage::getAutocompletionFileMatches(
 		match.nodeType = NodeType(NODE_FILE);
 		match.typeName = match.nodeType.getReadableTypeWString();
 
-		match.searchType = SearchMatch::SEARCH_TOKEN;
+match.searchType = SearchMatch::SEARCH_TOKEN;
 
-		matches.push_back(match);
+matches.push_back(match);
 	}
 
 	return matches;
@@ -949,7 +1130,7 @@ std::vector<SearchMatch> PersistentStorage::getAutocompletionCommandMatches(
 
 	// create SearchMatches
 	std::vector<SearchMatch> matches;
-	for (const SearchResult& result: results)
+	for (const SearchResult& result : results)
 	{
 		SearchMatch match;
 
@@ -970,7 +1151,7 @@ std::vector<SearchMatch> PersistentStorage::getAutocompletionCommandMatches(
 
 		if (acceptedNodeTypes == NodeTypeSet::all() ||
 			(match.getCommandType() == SearchMatch::COMMAND_NODE_FILTER &&
-			 !(acceptedNodeTypes.contains(match.nodeType))))
+				!(acceptedNodeTypes.contains(match.nodeType))))
 		{
 			matches.push_back(match);
 		}
@@ -982,7 +1163,7 @@ std::vector<SearchMatch> PersistentStorage::getAutocompletionCommandMatches(
 std::vector<SearchMatch> PersistentStorage::getSearchMatchesForTokenIds(
 	const std::vector<Id>& elementIds) const
 {
-	TRACE();
+	TIME_TRACE();
 
 	// todo: what if all these elements share the same node in the searchindex?
 	// In that case there should be only one search match.
@@ -990,12 +1171,12 @@ std::vector<SearchMatch> PersistentStorage::getSearchMatchesForTokenIds(
 
 	// fetch StorageNodes for node ids
 	std::map<Id, StorageNode> storageNodeMap;
-	for (StorageNode& node: m_sqliteIndexStorage.getAllByIds<StorageNode>(elementIds))
+	for (StorageNode& node : m_sqliteIndexStorage.getAllByIds<StorageNode>(elementIds))
 	{
 		storageNodeMap.emplace(node.id, node);
 	}
 
-	for (Id elementId: elementIds)
+	for (Id elementId : elementIds)
 	{
 		if (storageNodeMap.find(elementId) == storageNodeMap.end())
 		{
@@ -1027,11 +1208,38 @@ std::vector<SearchMatch> PersistentStorage::getSearchMatchesForTokenIds(
 
 std::shared_ptr<Graph> PersistentStorage::getGraphForAll() const
 {
-	TRACE();
+	TIME_TRACE();
 
 	std::shared_ptr<Graph> graph = std::make_shared<Graph>();
 	const size_t sdk_size = m_symbolDefinitionKinds.size();
-	m_sqliteIndexStorage.forEach<StorageNode>([&, sdk_size](StorageNode&& storageNode) {
+	if (sdk_size == 0 || m_fileNodeIndexed.size() == 0)
+	{
+		for (auto& id: m_node_ids)
+		{
+			auto node = std::dynamic_pointer_cast<StorageNode>(m_BES[id]->m_exBE);
+			const NodeType type(intToNodeKind(node->type));
+			if ((m_BES[id]->m_type & BaseElement::BE_FILE) == BaseElement::BE_FILE)
+			{
+				auto file = std::dynamic_pointer_cast<StorageFile>(m_BES[id]);		
+				if (file->indexed)
+				{
+					addFileNodeToGraph(*(node.get()), graph.get());
+				}
+			}
+			else {
+				bool showNode = true;
+				if ((m_BES[id]->m_type & BaseElement::BE_SYMBOL) == BaseElement::BE_SYMBOL) {
+					auto symbol = std::dynamic_pointer_cast<StorageSymbol>(m_BES[id]);	
+					showNode = symbol->definitionKind == DEFINITION_EXPLICIT;
+				}
+				if (showNode && (type.isPackage() || !m_hierarchyCache.isChildOfVisibleNodeOrInvisible(node->id))) {
+					addNodeToGraph(*(node.get()), type, graph.get(), false);
+				}
+			}
+		}
+		return graph;
+	}
+	m_sqliteIndexStorage.forEach<StorageNode>([&, sdk_size](StorageNode& storageNode) {
 		const NodeType type(intToNodeKind(storageNode.type));
 		if (type.isFile())
 		{
@@ -1062,11 +1270,33 @@ std::shared_ptr<Graph> PersistentStorage::getGraphForAll() const
 
 std::shared_ptr<Graph> PersistentStorage::getGraphForNodeTypes(NodeTypeSet nodeTypes) const
 {
-	TRACE();
+	TIME_TRACE();
 
 	std::vector<Id> tokenIds;
+	if (m_symbolDefinitionKinds.size() == 0 || m_fileNodePaths.size() == 0) 
+	{
+		for (auto& item : m_node_ids) {
+			if ((m_BES[item]->m_type & BaseElement::BS_NS) == BaseElement::BS_NS) {
+				auto node = std::dynamic_pointer_cast<StorageNode>(m_BES[item]->m_exBE);
+				if (nodeTypes.contains(NodeType(intToNodeKind(node->type))))
+				{
+					auto symbol = std::dynamic_pointer_cast<StorageSymbol>(m_BES[item]->m_exBE);
+					if (symbol->definitionKind == DEFINITION_EXPLICIT) {
+						tokenIds.push_back(item);
+					}
+				}
+			}
+		}
+		if (nodeTypes.containsMatching([](const NodeType& type) { return type.isFile(); }))
+		{
+			tokenIds.insert(tokenIds.end(), m_file_ids.begin(), m_file_ids.end());
+		}
+		std::shared_ptr<Graph> graph = std::make_shared<Graph>();
+		addNodesWithParentsAndEdgesToGraph(tokenIds, std::vector<Id>(), graph.get(), false);
+    	return graph;
+	}
 
-	m_sqliteIndexStorage.forEach<StorageNode>([&](StorageNode&& node) {
+	m_sqliteIndexStorage.forEach<StorageNode>([&](StorageNode& node) {
 		if (nodeTypes.contains(NodeType(intToNodeKind(node.type))))
 		{
 			auto it = m_symbolDefinitionKinds.find(node.id);
@@ -1094,7 +1324,7 @@ std::shared_ptr<Graph> PersistentStorage::getGraphForNodeTypes(NodeTypeSet nodeT
 std::shared_ptr<Graph> PersistentStorage::getGraphForActiveTokenIds(
 	const std::vector<Id>& tokenIds, const std::vector<Id>& expandedNodeIds, bool* isActiveNamespace) const
 {
-	TRACE();
+	TIME_TRACE();
 
 	std::vector<Id> ids(tokenIds);
 	bool isPackage = false;
@@ -1266,7 +1496,7 @@ std::shared_ptr<Graph> PersistentStorage::getGraphForActiveTokenIds(
 
 std::shared_ptr<Graph> PersistentStorage::getGraphForChildrenOfNodeId(Id nodeId) const
 {
-	TRACE();
+	TIME_TRACE();
 
 	std::vector<Id> nodeIds;
 	std::vector<Id> edgeIds;
@@ -1291,7 +1521,7 @@ std::shared_ptr<Graph> PersistentStorage::getGraphForTrail(
 	size_t depth,
 	bool directed) const
 {
-	TRACE();
+	TIME_TRACE();
 
 	std::set<Id> nodeIds;
 	std::set<Id> edgeIds;
@@ -1388,7 +1618,24 @@ std::shared_ptr<Graph> PersistentStorage::getGraphForTrail(
 					if (!nodeNonIndexed)
 					{
 						if (kind == NODE_FILE)
-						{
+						{	
+							if (m_fileNodeIndexed.size() == 0)
+							{
+								if ((m_BES[node.id]->m_type & BaseElement::BE_FILE) ==
+									BaseElement::BE_FILE)
+								{
+									auto file = std::dynamic_pointer_cast<StorageFile>(m_BES[node.id]);
+									if (!file->indexed)
+									{
+										continue;
+									}
+								}
+								else
+								{
+									continue;
+								}
+							}
+					
 							auto it = m_fileNodeIndexed.find(node.id);
 							if (it == m_fileNodeIndexed.end() || !it->second)
 							{
@@ -1397,11 +1644,23 @@ std::shared_ptr<Graph> PersistentStorage::getGraphForTrail(
 						}
 						else
 						{
-							auto it = m_symbolDefinitionKinds.find(node.id);
-							if (it == m_symbolDefinitionKinds.end() || it->second == DEFINITION_NONE)
+							
+							if (m_symbolDefinitionKinds.size() == 0)
 							{
-								continue;
+								auto symbol = get_symbol(node.id);
+								if (symbol == nullptr || symbol->definitionKind == DEFINITION_NONE)
+								{
+									continue;
+								}
 							}
+							else {
+								auto it = m_symbolDefinitionKinds.find(node.id);
+								if (it == m_symbolDefinitionKinds.end() ||
+									it->second == DEFINITION_NONE)
+								{
+									continue;
+								}
+							}									
 						}
 					}
 
@@ -1505,7 +1764,7 @@ std::shared_ptr<Graph> PersistentStorage::getGraphForTrail(
 
 NodeKindMask PersistentStorage::getAvailableNodeTypes() const
 {
-	TRACE();
+	TIME_TRACE();
 
 	NodeKindMask mask = 0;
 	for (int type: m_sqliteIndexStorage.getAvailableNodeTypes())
@@ -1517,7 +1776,7 @@ NodeKindMask PersistentStorage::getAvailableNodeTypes() const
 
 Edge::TypeMask PersistentStorage::getAvailableEdgeTypes() const
 {
-	TRACE();
+	TIME_TRACE();
 
 	Edge::TypeMask mask = 0;
 	for (int type: m_sqliteIndexStorage.getAvailableEdgeTypes())
@@ -1530,7 +1789,7 @@ Edge::TypeMask PersistentStorage::getAvailableEdgeTypes() const
 // TODO: rename: getActiveElementIdsForId; TODO: make separate function for declarationId
 std::vector<Id> PersistentStorage::getActiveTokenIdsForId(Id tokenId, Id* declarationId) const
 {
-	TRACE();
+	TIME_TRACE();
 
 	std::vector<Id> activeTokenIds;
 
@@ -1559,7 +1818,7 @@ std::vector<Id> PersistentStorage::getActiveTokenIdsForId(Id tokenId, Id* declar
 
 std::vector<Id> PersistentStorage::getNodeIdsForLocationIds(const std::vector<Id>& locationIds) const
 {
-	TRACE();
+	TIME_TRACE();
 
 	std::set<Id> nodeIds;
 	std::set<Id> implicitNodeIds;
@@ -1575,8 +1834,16 @@ std::vector<Id> PersistentStorage::getNodeIdsForLocationIds(const std::vector<Id
 			elementId = edge.targetNodeId;
 		}
 
-		auto it = m_symbolDefinitionKinds.find(elementId);
-		if ((it != m_symbolDefinitionKinds.end() && it->second == DEFINITION_IMPLICIT) ||
+		bool is_mplict = false;
+		if (m_symbolDefinitionKinds.size() == 0) {
+			auto symbol = get_symbol(elementId);
+			is_mplict = symbol != nullptr && symbol->definitionKind  == DEFINITION_IMPLICIT;
+		}
+		else {
+			auto it = m_symbolDefinitionKinds.find(elementId);
+			is_mplict = it != m_symbolDefinitionKinds.end() && it->second == DEFINITION_IMPLICIT;
+		}
+		if (is_mplict ||
 			Edge::intToType(edge.type) == Edge::EDGE_OVERRIDE)
 		{
 			implicitNodeIds.insert(elementId);
@@ -1598,7 +1865,7 @@ std::vector<Id> PersistentStorage::getNodeIdsForLocationIds(const std::vector<Id
 std::shared_ptr<SourceLocationCollection> PersistentStorage::getSourceLocationsForTokenIds(
 	const std::vector<Id>& tokenIds) const
 {
-	TRACE();
+	TIME_TRACE();
 
 	std::map<Id, FilePath> filePaths;
 	std::vector<Id> nonFileIds;
@@ -1606,9 +1873,18 @@ std::shared_ptr<SourceLocationCollection> PersistentStorage::getSourceLocationsF
 	for (const Id tokenId: tokenIds)
 	{
 		FilePath path = getFileNodePath(tokenId);
-
+		
+		bool is_symbol = true;
+		if (m_symbolDefinitionKinds.size() == 0) {
+			auto symbol = get_symbol(tokenId);
+			is_symbol = symbol == nullptr;
+		}
+		else {
+			is_symbol = m_symbolDefinitionKinds.find(tokenId) == m_symbolDefinitionKinds.end();
+		}
+		
 		// check for non-indexed file
-		if (path.empty() && m_symbolDefinitionKinds.find(tokenId) == m_symbolDefinitionKinds.end())
+		if (path.empty() && is_symbol)
 		{
 			const StorageNode fileNode = m_sqliteIndexStorage.getNodeById(tokenId);
 			if (NodeType(intToNodeKind(fileNode.type)).isFile())
@@ -1704,7 +1980,7 @@ std::shared_ptr<SourceLocationCollection> PersistentStorage::getSourceLocationsF
 std::shared_ptr<SourceLocationCollection> PersistentStorage::getSourceLocationsForLocationIds(
 	const std::vector<Id>& locationIds) const
 {
-	TRACE();
+	TIME_TRACE();
 
 	std::shared_ptr<SourceLocationCollection> collection =
 		std::make_shared<SourceLocationCollection>();
@@ -1745,7 +2021,7 @@ std::shared_ptr<SourceLocationCollection> PersistentStorage::getSourceLocationsF
 std::shared_ptr<SourceLocationFile> PersistentStorage::getSourceLocationsForFile(
 	const FilePath& filePath) const
 {
-	TRACE();
+	TIME_TRACE();
 
 	return m_sqliteIndexStorage.getSourceLocationsForFile(filePath)->getFilteredByTypes(
 		{LOCATION_TOKEN, LOCATION_SCOPE, LOCATION_QUALIFIER, LOCATION_LOCAL_SYMBOL, LOCATION_UNSOLVED});
@@ -1754,7 +2030,7 @@ std::shared_ptr<SourceLocationFile> PersistentStorage::getSourceLocationsForFile
 std::shared_ptr<SourceLocationFile> PersistentStorage::getSourceLocationsForLinesInFile(
 	const FilePath& filePath, size_t startLine, size_t endLine) const
 {
-	TRACE();
+	TIME_TRACE();
 
 	return m_sqliteIndexStorage.getSourceLocationsForLinesInFile(filePath, startLine, endLine)
 		->getFilteredByLines(startLine, endLine)
@@ -1769,7 +2045,7 @@ std::shared_ptr<SourceLocationFile> PersistentStorage::getSourceLocationsForLine
 std::shared_ptr<SourceLocationFile> PersistentStorage::getSourceLocationsOfTypeInFile(
 	const FilePath& filePath, LocationType type) const
 {
-	TRACE();
+	TIME_TRACE();
 
 	return m_sqliteIndexStorage.getSourceLocationsOfTypeInFile(filePath, type);
 }
@@ -1777,7 +2053,7 @@ std::shared_ptr<SourceLocationFile> PersistentStorage::getSourceLocationsOfTypeI
 std::shared_ptr<TextAccess> PersistentStorage::getFileContent(
 	const FilePath& filePath, bool showsErrors) const
 {
-	TRACE();
+	TIME_TRACE();
 
 	std::shared_ptr<TextAccess> fileContent = m_sqliteIndexStorage.getFileContentByPath(
 		filePath.wstr());
@@ -1825,7 +2101,7 @@ std::vector<FileInfo> PersistentStorage::getFileInfosForFilePaths(
 
 StorageStats PersistentStorage::getStorageStats() const
 {
-	TRACE();
+	TIME_TRACE();
 
 	StorageStats stats;
 
@@ -1921,7 +2197,7 @@ std::vector<ErrorInfo> PersistentStorage::getErrorsForFileLimited(
 std::shared_ptr<SourceLocationCollection> PersistentStorage::getErrorSourceLocations(
 	const std::vector<ErrorInfo>& errors) const
 {
-	TRACE();
+	TIME_TRACE();
 
 	std::shared_ptr<SourceLocationCollection> collection =
 		std::make_shared<SourceLocationCollection>();
@@ -2144,7 +2420,7 @@ std::vector<BookmarkCategory> PersistentStorage::getAllBookmarkCategories() cons
 TooltipInfo PersistentStorage::getTooltipInfoForTokenIds(
 	const std::vector<Id>& tokenIds, TooltipOrigin origin) const
 {
-	TRACE();
+	TIME_TRACE();
 
 	TooltipInfo info;
 
@@ -2235,7 +2511,7 @@ TooltipInfo PersistentStorage::getTooltipInfoForTokenIds(
 
 TooltipSnippet PersistentStorage::getTooltipSnippetForNode(const StorageNode& node) const
 {
-	TRACE();
+	TIME_TRACE();
 
 	const NameHierarchy nameHierarchy = NameHierarchy::deserialize(node.serializedName);
 	TooltipSnippet snippet;
@@ -2490,7 +2766,7 @@ TooltipSnippet PersistentStorage::getTooltipSnippetForNode(const StorageNode& no
 TooltipInfo PersistentStorage::getTooltipInfoForSourceLocationIdsAndLocalSymbolIds(
 	const std::vector<Id>& locationIds, const std::vector<Id>& localSymbolIds) const
 {
-	TRACE();
+	TIME_TRACE();
 
 	const TextCodec codec(ApplicationSettings::getInstance()->getTextEncoding());
 
@@ -2556,14 +2832,14 @@ Id PersistentStorage::getFileNodeId(const FilePath& filePath) const
 	}
 
 	{
-		std::map<FilePath, Id>::const_iterator it = m_fileNodeIds.find(filePath);
+		auto it = m_fileNodeIds.find(filePath);
 		if (it != m_fileNodeIds.end())
 		{
 			return it->second;
 		}
 	}
 	{
-		std::map<FilePath, Id>::const_iterator it = m_lowerCasefileNodeIds.find(
+		auto it = m_lowerCasefileNodeIds.find(
 			filePath.getLowerCase());
 		if (it != m_lowerCasefileNodeIds.end())
 		{
@@ -2601,8 +2877,15 @@ FilePath PersistentStorage::getFileNodePath(Id fileId) const
 		LOG_ERROR("No file id set");
 		return FilePath();
 	}
-
-	std::map<Id, FilePath>::const_iterator it = m_fileNodePaths.find(fileId);
+	
+	if (m_fileNodePaths.size() == 0) {
+		if (m_BES[fileId].get() && (m_BES[fileId]->m_type & BaseElement::BE_FILE) == BaseElement::BE_FILE) {
+			auto file = std::dynamic_pointer_cast<StorageFile>(m_BES[fileId]);
+			return FilePath(file->filePath);
+		}
+		return FilePath();
+	}
+	auto it = m_fileNodePaths.find(fileId);
 
 	if (it != m_fileNodePaths.end())
 	{
@@ -2614,6 +2897,13 @@ FilePath PersistentStorage::getFileNodePath(Id fileId) const
 
 bool PersistentStorage::getFileNodeComplete(Id fileId) const
 {
+	if (m_fileNodeComplete.size() == 0) {
+		if ((m_BES[fileId]->m_type & BaseElement::BE_FILE) == BaseElement::BE_FILE) {
+			auto file = std::dynamic_pointer_cast<StorageFile>(m_BES[fileId]);
+			return file->complete;
+		}		
+		return false;
+	}
 	auto it = m_fileNodeComplete.find(fileId);
 	if (it != m_fileNodeComplete.end())
 	{
@@ -2625,6 +2915,15 @@ bool PersistentStorage::getFileNodeComplete(Id fileId) const
 
 bool PersistentStorage::getFileNodeIndexed(Id fileId) const
 {
+	if (m_fileNodeIndexed.size() == 0)
+	{
+		if ((m_BES[fileId]->m_type & BaseElement::BE_FILE) == BaseElement::BE_FILE)
+		{
+			auto file = std::dynamic_pointer_cast<StorageFile>(m_BES[fileId]);
+			return file->indexed;
+		}
+		return false;
+	}
 	auto it = m_fileNodeIndexed.find(fileId);
 	if (it != m_fileNodeIndexed.end())
 	{
@@ -2636,6 +2935,16 @@ bool PersistentStorage::getFileNodeIndexed(Id fileId) const
 
 std::wstring PersistentStorage::getFileNodeLanguage(Id fileId) const
 {
+
+	if (m_fileNodeLanguage.size() == 0)
+	{
+		if ((m_BES[fileId]->m_type & BaseElement::BE_FILE) == BaseElement::BE_FILE)
+		{
+			auto file = std::dynamic_pointer_cast<StorageFile>(m_BES[fileId]);
+			return file->languageIdentifier;
+		}
+		return L"";
+	}
 	auto it = m_fileNodeLanguage.find(fileId);
 	if (it != m_fileNodeLanguage.end())
 	{
@@ -2650,7 +2959,7 @@ std::unordered_map<Id, std::set<Id>> PersistentStorage::getFileIdToIncludingFile
 	std::unordered_map<Id, std::set<Id>> fileIdToIncludingFileIdMap;
 
 	m_sqliteIndexStorage.forEachOfType<StorageEdge>(
-		Edge::typeToInt(Edge::EDGE_INCLUDE), [&fileIdToIncludingFileIdMap](StorageEdge&& edge) {
+		Edge::typeToInt(Edge::EDGE_INCLUDE), [&fileIdToIncludingFileIdMap](StorageEdge& edge) {
 			fileIdToIncludingFileIdMap[edge.targetNodeId].insert(edge.sourceNodeId);
 		});
 
@@ -2662,7 +2971,7 @@ std::unordered_map<Id, std::set<Id>> PersistentStorage::getFileIdToIncludedFileI
 	std::unordered_map<Id, std::set<Id>> fileIdToIncludingFileIdMap;
 
 	m_sqliteIndexStorage.forEachOfType<StorageEdge>(
-		Edge::typeToInt(Edge::EDGE_INCLUDE), [&fileIdToIncludingFileIdMap](StorageEdge&& edge) {
+		Edge::typeToInt(Edge::EDGE_INCLUDE), [&fileIdToIncludingFileIdMap](StorageEdge& edge) {
 			fileIdToIncludingFileIdMap[edge.sourceNodeId].insert(edge.targetNodeId);
 		});
 
@@ -2678,7 +2987,7 @@ std::unordered_map<Id, std::set<Id>> PersistentStorage::getFileIdToImportingFile
 
 		m_sqliteIndexStorage.forEachOfType<StorageEdge>(
 			Edge::typeToInt(Edge::EDGE_IMPORT),
-			[&importedElementIds, &elementIdToImportingFileIds](StorageEdge&& edge) {
+			[&importedElementIds, &elementIdToImportingFileIds](StorageEdge& edge) {
 				importedElementIds.push_back(edge.targetNodeId);
 				elementIdToImportingFileIds[edge.targetNodeId].insert(edge.sourceNodeId);
 			});
@@ -2822,7 +3131,7 @@ std::set<FilePath> PersistentStorage::getReferencingByImports(const std::set<Fil
 void PersistentStorage::addNodesToGraph(
 	const std::vector<Id>& newNodeIds, Graph* graph, bool addChildCount) const
 {
-	TRACE();
+	TIME_TRACE();
 
 	std::vector<Id> nodeIds;
 	if (graph->getNodeCount())
@@ -2875,11 +3184,29 @@ void PersistentStorage::addFileNodeToGraph(const StorageNode& storageNode, Graph
 	node->addComponent(std::make_shared<TokenComponentFilePath>(filePath, complete));
 }
 
+std::shared_ptr<StorageSymbol> PersistentStorage::get_symbol(Id id) const
+{
+	if (m_BES[id].get() &&
+			(m_BES[id]->m_type & BaseElement::BE_SYMBOL) == BaseElement::BE_SYMBOL)
+	{
+			return std::dynamic_pointer_cast<StorageSymbol>(m_BES[id]);	
+	}
+	return nullptr;
+}
+
 void PersistentStorage::addNodeToGraph(
 	const StorageNode& newNode, const NodeType& type, Graph* graph, bool addChildCount) const
 {
 	NameHierarchy nameHierarchy = NameHierarchy::deserialize(newNode.serializedName);
 	DefinitionKind defKind = DEFINITION_NONE;
+
+	if (m_symbolDefinitionKinds.size() == 0)
+	{
+		auto symbol = get_symbol(newNode.id);
+		if (symbol.get() != nullptr) {
+			defKind = intToDefinitionKind(symbol->definitionKind);
+		}
+	}
 	auto it = m_symbolDefinitionKinds.find(newNode.id);
 	if (it != m_symbolDefinitionKinds.end())
 	{
@@ -2896,7 +3223,7 @@ void PersistentStorage::addNodeToGraph(
 
 void PersistentStorage::addEdgesToGraph(const std::vector<Id>& newEdgeIds, Graph* graph) const
 {
-	TRACE();
+	TIME_TRACE();
 
 	std::vector<Id> edgeIds;
 	for (Id id: newEdgeIds)
@@ -2942,7 +3269,7 @@ void PersistentStorage::addEdgesToGraph(const std::vector<Id>& newEdgeIds, Graph
 void PersistentStorage::addNodesWithParentsAndEdgesToGraph(
 	const std::vector<Id>& nodeIds, const std::vector<Id>& edgeIds, Graph* graph, bool addChildCount) const
 {
-	TRACE();
+	TIME_TRACE();
 
 	std::set<Id> allNodeIds(nodeIds.begin(), nodeIds.end());
 	std::set<Id> allEdgeIds(edgeIds.begin(), edgeIds.end());
@@ -2971,7 +3298,7 @@ void PersistentStorage::addNodesWithParentsAndEdgesToGraph(
 void PersistentStorage::addBundledEdgesToGraph(
 	Id nodeId, const std::vector<StorageEdge>& edgesToBundle, Graph* graph) const
 {
-	TRACE();
+	TIME_TRACE();
 
 	struct EdgeInfo
 	{
@@ -3096,6 +3423,19 @@ void PersistentStorage::addFileContentsToGraph(Id fileId, Graph* graph) const
 		{
 			if (tokenIdsSet.insert(tokenId).second)
 			{
+				if (m_symbolDefinitionKinds.size() == 0) {
+					if (m_BES[tokenId].get() &&
+						(m_BES[tokenId]->m_type & BaseElement::BE_SYMBOL) == BaseElement::BE_SYMBOL)
+					{
+						auto symbol = std::dynamic_pointer_cast<StorageSymbol>(m_BES[tokenId]);
+						if(symbol->definitionKind != DEFINITION_EXPLICIT)
+							tokenIds.push_back(tokenId);
+					}
+					else {
+						tokenIds.push_back(tokenId);
+					}
+				}
+				
 				auto it = m_symbolDefinitionKinds.find(tokenId);
 				if (it == m_symbolDefinitionKinds.end() || it->second != DEFINITION_IMPLICIT)
 				{
@@ -3125,7 +3465,7 @@ void PersistentStorage::addFileContentsToGraph(Id fileId, Graph* graph) const
 
 void PersistentStorage::addComponentAccessToGraph(Graph* graph) const
 {
-	TRACE();
+	TIME_TRACE();
 
 	std::vector<Id> nodeIds;
 	graph->forEachNode([&nodeIds](Node* node) { nodeIds.push_back(node->getId()); });
@@ -3144,7 +3484,7 @@ void PersistentStorage::addComponentAccessToGraph(Graph* graph) const
 
 void PersistentStorage::addComponentIsAmbiguousToGraph(Graph* graph) const
 {
-	TRACE();
+	TIME_TRACE();
 
 	std::vector<Id> edgeIds;
 	graph->forEachEdge([&edgeIds](Edge* edge) { edgeIds.push_back(edge->getId()); });
@@ -3164,7 +3504,7 @@ void PersistentStorage::addComponentIsAmbiguousToGraph(Graph* graph) const
 void PersistentStorage::addCompleteFlagsToSourceLocationCollection(
 	SourceLocationCollection* collection) const
 {
-	TRACE();
+	TIME_TRACE();
 
 	collection->forEachSourceLocationFile([this](std::shared_ptr<SourceLocationFile> file) {
 		Id fileId = getFileNodeId(file->getFilePath());
@@ -3176,7 +3516,7 @@ void PersistentStorage::addCompleteFlagsToSourceLocationCollection(
 
 void PersistentStorage::addInheritanceChainsToGraph(const std::vector<Id>& activeNodeIds, Graph* graph) const
 {
-	TRACE();
+	TIME_TRACE();
 
 	std::set<Id> activeNodeIdsSet;
 	for (Id activeNodeId: activeNodeIds)
@@ -3244,36 +3584,61 @@ void PersistentStorage::addInheritanceChainsToGraph(const std::vector<Id>& activ
 
 void PersistentStorage::buildFilePathMaps()
 {
-	TRACE();
+	TIME_TRACE();
+	std::vector<std::shared_ptr<std::thread>> threads;
+	std::shared_ptr<std::thread> thread1 = std::make_shared<std::thread>(
+		[this](){
+			m_sqliteIndexStorage.forEach<StorageFile>(
+				[this](StorageFile& file)
+				{
+					const FilePath path(file.filePath);
+					m_fileNodeIds.emplace(path, file.id);
+					m_lowerCasefileNodeIds.emplace(path.getLowerCase(), file.id);
+					m_fileNodePaths.emplace_hint(m_fileNodePaths.end(), file.id, path);
+					m_fileNodeComplete.emplace_hint(m_fileNodeComplete.end(), file.id, file.complete);
+					m_fileNodeIndexed.emplace_hint(m_fileNodeIndexed.end(), file.id, file.indexed);
+					m_fileNodeLanguage.emplace_hint(
+						m_fileNodeLanguage.end(), file.id, file.languageIdentifier);
 
-	m_sqliteIndexStorage.forEach<StorageFile>([&](StorageFile&& file) {
-		const FilePath path(file.filePath);
+					if (!m_hasJavaFiles && path.extension() == L".java")
+					{
+						m_hasJavaFiles = true;
+					}
+				});
+		});
 
-		m_fileNodeIds.emplace(path, file.id);
-		m_lowerCasefileNodeIds.emplace(path.getLowerCase(), file.id);
-		m_fileNodePaths.emplace(file.id, path);
-		m_fileNodeComplete.emplace(file.id, file.complete);
-		m_fileNodeIndexed.emplace(file.id, file.indexed);
-		m_fileNodeLanguage.emplace(file.id, file.languageIdentifier);
 
-		if (!m_hasJavaFiles && path.extension() == L".java")
+	std::shared_ptr<std::thread> thread2 = std::make_shared<std::thread>(
+		[this]()
 		{
-			m_hasJavaFiles = true;
-		}
-	});
-
-	m_sqliteIndexStorage.forEach<StorageSymbol>([&](StorageSymbol&& symbol) {
-		m_symbolDefinitionKinds.emplace(symbol.id, intToDefinitionKind(symbol.definitionKind));
-	});
+			m_sqliteIndexStorage.forEach<StorageSymbol>(
+				[this](StorageSymbol& symbol)
+				{
+					m_symbolDefinitionKinds.emplace_hint(
+						m_symbolDefinitionKinds.end(),
+						symbol.id,
+						intToDefinitionKind(symbol.definitionKind));
+				});
+		});
+	threads.emplace_back(thread1);
+	threads.emplace_back(thread2);
+	for (std::shared_ptr<std::thread> thread: threads)
+	{
+		thread->join();
+	}
 }
 
 void PersistentStorage::buildSearchIndex()
 {
-	TRACE();
+	TIME_TRACE();
+
 
 	const FilePath dbPath = getIndexDbFilePath();
-
-	m_sqliteIndexStorage.forEach<StorageNode>([&](StorageNode&& node) {
+	/*{
+		TRACE("test_sqlite");
+		m_sqliteIndexStorage.forEach<StorageNode>([&](StorageNode& node) {});
+	}*/
+	m_sqliteIndexStorage.forEach<StorageNode>([&](StorageNode& node) {
 		const NodeType type(intToNodeKind(node.type));
 		if (type.isFile())
 		{
@@ -3328,7 +3693,7 @@ void PersistentStorage::buildSearchIndex()
 
 void PersistentStorage::buildFullTextSearchIndex() const
 {
-	TRACE();
+	TIME_TRACE();
 
 	TextCodec codec(ApplicationSettings::getInstance()->getTextEncoding());
 
@@ -3370,7 +3735,7 @@ void PersistentStorage::buildFullTextSearchIndex() const
 
 void PersistentStorage::buildMemberEdgeIdOrderMap()
 {
-	TRACE();
+	TIME_TRACE();
 
 	if (!m_hasJavaFiles)
 	{
@@ -3382,7 +3747,7 @@ void PersistentStorage::buildMemberEdgeIdOrderMap()
 
 	m_sqliteIndexStorage.forEachOfType<StorageEdge>(
 		Edge::typeToInt(Edge::EDGE_MEMBER),
-		[&childNodeIds, &childIdToMemberEdgeIdMap](StorageEdge&& edge) {
+		[&childNodeIds, &childIdToMemberEdgeIdMap](StorageEdge& edge) {
 			childNodeIds.push_back(edge.targetNodeId);
 			childIdToMemberEdgeIdMap.emplace(edge.targetNodeId, edge.id);
 		});
@@ -3442,27 +3807,27 @@ void PersistentStorage::buildMemberEdgeIdOrderMap()
 
 void PersistentStorage::buildHierarchyCache()
 {
-	TRACE();
+	TIME_TRACE();
 
 	std::vector<Id> sourceNodeIds;
 	std::vector<StorageEdge> memberEdges;
-
+	auto t_start = std::chrono::high_resolution_clock::now();
 	m_sqliteIndexStorage.forEachOfType<StorageEdge>(
-		Edge::typeToInt(Edge::EDGE_MEMBER), [&sourceNodeIds, &memberEdges](StorageEdge&& edge) {
+		Edge::typeToInt(Edge::EDGE_MEMBER), [&sourceNodeIds, &memberEdges](StorageEdge& edge) {
 			sourceNodeIds.push_back(edge.sourceNodeId);
 			memberEdges.emplace_back(edge);
 		});
 
 	std::set<Id> invisibleParentSourceNodeIds;
-
+	NodeType nodetype(NODE_SYMBOL);
 	m_sqliteIndexStorage.forEachByIds<StorageNode>(
-		sourceNodeIds, [&invisibleParentSourceNodeIds](StorageNode&& node) {
-			if (!NodeType(intToNodeKind(node.type)).isVisibleAsParentInGraph())
+		sourceNodeIds, [&invisibleParentSourceNodeIds, &nodetype](StorageNode& node) {
+			nodetype.setKind(static_cast<NodeKind>(node.type));
+			if (!nodetype.isVisibleAsParentInGraph())
 			{
 				invisibleParentSourceNodeIds.insert(node.id);
 			}
 		});
-
 	for (const StorageEdge& edge: memberEdges)
 	{
 		bool sourceIsVisible = true;
@@ -3493,9 +3858,8 @@ void PersistentStorage::buildHierarchyCache()
 			sourceIsImplicit,
 			targetIsImplicit);
 	}
-
 	m_sqliteIndexStorage.forEachOfType<StorageEdge>(
-		Edge::typeToInt(Edge::EDGE_INHERITANCE), [this](StorageEdge&& edge) {
+		Edge::typeToInt(Edge::EDGE_INHERITANCE), [this](StorageEdge& edge) {
 			m_hierarchyCache.createInheritance(edge.id, edge.sourceNodeId, edge.targetNodeId);
 		});
 }

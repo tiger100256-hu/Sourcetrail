@@ -9,6 +9,12 @@ set(BUILD_PYTHON_LANGUAGE_PACKAGE OFF CACHE BOOL "Add Python support to the Sour
 set(DOCKER_BUILD OFF CACHE BOOL "Build runs in Docker")
 set(TREAT_WARNINGS_AS_ERRORS ON CACHE BOOL "Treat compiler warnings as errors")
 
+#add_compile_options(-DSQLITE_THREADSAFE=1)
+#add_compile_options(-DSQLITE_DEFAULT_MEMSTATUS=0)
+#add_compile_options(-DSQLITE_MAX_EXPR_DEPTH=0)
+#add_compile_options(-DSQLITE_OMIT_SHARED_CACHE)
+#dd_compile_options(-DSQLITE_DEFAULT_CACHE_SIZE=500000)
+
 #set (CMAKE_VERBOSE_MAKEFILE ON)
 
 include(cmake/add_files.cmake)

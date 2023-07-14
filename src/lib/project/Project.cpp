@@ -221,7 +221,8 @@ void Project::load(std::shared_ptr<DialogView> dialogView)
 	if (canLoad)
 	{
 		m_storage->setMode(SqliteIndexStorage::STORAGE_MODE_READ);
-		m_storage->buildCaches();
+		m_storage->buildCachesNew();
+		//m_storage->buildCaches();
 		m_storageCache->setSubject(m_storage);
 
 		if (m_hasGUI)

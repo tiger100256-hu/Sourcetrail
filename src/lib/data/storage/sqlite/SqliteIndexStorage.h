@@ -23,6 +23,7 @@
 #include "types.h"
 #include "utility.h"
 #include "utilityString.h"
+#include "logging.h"
 
 class TextAccess;
 class Version;
@@ -165,23 +166,31 @@ public:
 	}
 
 	template <typename StorageType>
-	void forEach(std::function<void(StorageType&&)> func) const
+	void forEach(std::function<void(StorageType&)> func) const
 	{
 		forEach("", func);
 	}
 
 	template <typename StorageType>
-	void forEachOfType(int type, std::function<void(StorageType&&)> func) const
+	void forEachOfType(int type, std::function<void(StorageType&)> func) const
 	{
 		forEach("WHERE type == " + std::to_string(type), func);
 	}
 
 	template <typename StorageType>
-	void forEachByIds(const std::vector<Id> ids, std::function<void(StorageType&&)> func) const
+	void forEachByIds(const std::vector<Id> ids, std::function<void(StorageType&)> func) const
 	{
 		if (ids.size())
 		{
-			forEach("WHERE id IN (" + utility::join(utility::toStrings(ids), ',') + ")", func);
+			auto t_start = std::chrono::high_resolution_clock::now();
+			std::string query = utility::join(utility::toStrings(ids), ',');
+			auto t_end = std::chrono::high_resolution_clock::now();
+			double elapsed_time_ms =
+				std::chrono::duration<double, std::milli>(t_end - t_start).count();
+
+			LOG_INFO_STREAM(<< "query string:" << elapsed_time_ms);
+
+			forEach("WHERE id IN (" + query + ")", func);
 		}
 	}
 
@@ -246,7 +255,7 @@ private:
 	{
 		std::vector<ResultType> elements;
 		forEach<ResultType>(
-			query, [&elements](ResultType&& element) { elements.emplace_back(element); });
+			query, [&elements](ResultType& element) { elements.emplace_back(element); });
 		return elements;
 	}
 
@@ -262,8 +271,7 @@ private:
 	}
 
 	template <typename StorageType>
-	void forEach(const std::string& query, std::function<void(StorageType&&)> func) const;
-
+	void forEach(const std::string& query, std::function<void(StorageType&)> func) const;
 	LowMemoryStringMap<std::string, uint32_t, 0> m_tempNodeNameIndex;
 	LowMemoryStringMap<std::wstring, uint32_t, 0> m_tempWNodeNameIndex;
 	std::map<uint32_t, int> m_tempNodeTypes;
@@ -370,33 +378,32 @@ private:
 
 template <>
 void SqliteIndexStorage::forEach<StorageEdge>(
-	const std::string& query, std::function<void(StorageEdge&&)> func) const;
+	const std::string& query, std::function<void(StorageEdge&)> func) const;
 template <>
 void SqliteIndexStorage::forEach<StorageNode>(
-	const std::string& query, std::function<void(StorageNode&&)> func) const;
+	const std::string& query, std::function<void(StorageNode&)> func) const;
 template <>
 void SqliteIndexStorage::forEach<StorageSymbol>(
-	const std::string& query, std::function<void(StorageSymbol&&)> func) const;
+	const std::string& query, std::function<void(StorageSymbol&)> func) const;
+
 template <>
 void SqliteIndexStorage::forEach<StorageFile>(
-	const std::string& query, std::function<void(StorageFile&&)> func) const;
-template <>
-void SqliteIndexStorage::forEach<StorageLocalSymbol>(
-	const std::string& query, std::function<void(StorageLocalSymbol&&)> func) const;
+	const std::string& query, std::function<void(StorageFile&)> func) const;
+
 template <>
 void SqliteIndexStorage::forEach<StorageSourceLocation>(
-	const std::string& query, std::function<void(StorageSourceLocation&&)> func) const;
+	const std::string& query, std::function<void(StorageSourceLocation&)> func) const;
 template <>
 void SqliteIndexStorage::forEach<StorageOccurrence>(
-	const std::string& query, std::function<void(StorageOccurrence&&)> func) const;
+	const std::string& query, std::function<void(StorageOccurrence&)> func) const;
 template <>
 void SqliteIndexStorage::forEach<StorageComponentAccess>(
-	const std::string& query, std::function<void(StorageComponentAccess&&)> func) const;
+	const std::string& query, std::function<void(StorageComponentAccess&)> func) const;
 template <>
 void SqliteIndexStorage::forEach<StorageElementComponent>(
-	const std::string& query, std::function<void(StorageElementComponent&&)> func) const;
+	const std::string& query, std::function<void(StorageElementComponent&)> func) const;
 template <>
 void SqliteIndexStorage::forEach<StorageError>(
-	const std::string& query, std::function<void(StorageError&&)> func) const;
+	const std::string& query, std::function<void(StorageError&)> func) const;
 
 #endif	  // SQLITE_INDEX_STORAGE_H

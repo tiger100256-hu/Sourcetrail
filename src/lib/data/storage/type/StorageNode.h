@@ -5,26 +5,29 @@
 
 #include "types.h"
 
-struct StorageNodeData
+class StorageNodeData : public BaseElement
 {
+public:
 	StorageNodeData(): type(0), serializedName(L"") {}
 
 	StorageNodeData(int type, std::wstring serializedName)
 		: type(type), serializedName(std::move(serializedName))
 	{
+		m_type = BE_NODE;
 	}
 
 	bool operator<(const StorageNodeData& other) const
 	{
 		return serializedName < other.serializedName;
 	}
-
-	int type;
+public:
+	uint32_t type;
 	std::wstring serializedName;
 };
 
-struct StorageNode: public StorageNodeData
+class StorageNode: public StorageNodeData
 {
+public:
 	StorageNode(): StorageNodeData(), id(0) {}
 
 	StorageNode(Id id, int type, std::wstring serializedName)
@@ -33,7 +36,7 @@ struct StorageNode: public StorageNodeData
 	}
 
 	StorageNode(Id id, const StorageNodeData& data): StorageNodeData(data), id(id) {}
-
+public:
 	Id id;
 };
 

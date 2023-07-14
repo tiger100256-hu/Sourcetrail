@@ -5,8 +5,9 @@
 
 #include "types.h"
 
-struct StorageFile
+class StorageFile : public BaseElement
 {
+public:
 	StorageFile()
 		: id(0)
 		, filePath(L"")
@@ -15,6 +16,7 @@ struct StorageFile
 		, indexed(true)
 		, complete(true)
 	{
+		m_type = BE_FILE;
 	}
 
 	StorageFile(
@@ -31,13 +33,14 @@ struct StorageFile
 		, indexed(indexed)
 		, complete(complete)
 	{
+		m_type = BE_FILE;
 	}
 
 	bool operator<(const StorageFile& other) const
 	{
 		return filePath < other.filePath;
 	}
-
+public:
 	Id id;
 	std::wstring filePath;
 	std::wstring languageIdentifier;

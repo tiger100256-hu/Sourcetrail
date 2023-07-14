@@ -6,6 +6,7 @@
 
 #include "utility.h"
 #include "utilityString.h"
+#include "tracing.h"
 
 SearchIndex::SearchIndex()
 {
@@ -77,6 +78,7 @@ void SearchIndex::addNode(Id id, std::wstring name, NodeType type)
 
 void SearchIndex::finishSetup()
 {
+	TIME_TRACE();
 	for (auto& p: m_root->edges)
 	{
 		populateEdgeGate(p.second);

@@ -91,6 +91,7 @@ public:
 	bool getFilePathIndexed(const FilePath& path) const;
 
 	void buildCaches();
+	void buildCachesNew();
 
 	void optimizeMemory();
 
@@ -260,6 +261,7 @@ private:
 	void buildFullTextSearchIndex() const;
 	void buildMemberEdgeIdOrderMap();
 	void buildHierarchyCache();
+	std::shared_ptr<StorageSymbol> get_symbol(Id id) const;
 
 	bool m_preIndexingErrorCountSet = false;
 	size_t m_preIndexingErrorCount = 0;
@@ -278,17 +280,20 @@ private:
 
 	std::map<FilePath, Id> m_fileNodeIds;
 	std::map<FilePath, Id> m_lowerCasefileNodeIds;
-	std::map<Id, FilePath> m_fileNodePaths;
-	std::map<Id, bool> m_fileNodeComplete;
+	std::unordered_map<Id, FilePath> m_fileNodePaths;
+	std::unordered_map<Id, bool> m_fileNodeComplete;
 	std::unordered_map<Id, bool> m_fileNodeIndexed;
-	std::map<Id, std::wstring> m_fileNodeLanguage;
+	std::unordered_map<Id, std::wstring> m_fileNodeLanguage;
 
 	std::unordered_map<Id, DefinitionKind> m_symbolDefinitionKinds;
-	std::map<Id, Id> m_memberEdgeIdOrderMap;
+	std::unordered_map<Id, Id> m_memberEdgeIdOrderMap;
 
 	HierarchyCache m_hierarchyCache;
 
 	bool m_hasJavaFiles = false;
+	std::vector<BaseElementPtr> m_BES;
+	std::vector<Id> m_file_ids;
+	std::vector<Id> m_node_ids;
 };
 
 #endif	  // PERSISTENT_STORAGE_H

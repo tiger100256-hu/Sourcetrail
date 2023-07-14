@@ -4,14 +4,15 @@
 #include "DefinitionKind.h"
 #include "types.h"
 
-struct StorageSymbol
+class StorageSymbol : public BaseElement
 {
-	StorageSymbol(): id(0), definitionKind(definitionKindToInt(DEFINITION_NONE)) {}
+public:
+	StorageSymbol(): id(0), definitionKind(definitionKindToInt(DEFINITION_NONE)) {m_type = BE_SYMBOL;}
+    StorageSymbol(Id id, int definitionKind): id(id), definitionKind(definitionKind) {m_type = BE_SYMBOL;}
 
-	StorageSymbol(Id id, int definitionKind): id(id), definitionKind(definitionKind) {}
-
+public:
 	Id id;
-	int definitionKind;
+	uint8_t definitionKind;
 };
 
 #endif	  // STORAGE_SYMBOL_H

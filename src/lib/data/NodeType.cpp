@@ -42,6 +42,11 @@ NodeKind NodeType::getKind() const
 	return m_kind;
 }
 
+void NodeType::setKind(NodeKind kind)
+{
+	m_kind = kind;
+}
+
 Id NodeType::getId() const
 {
 	// TODO: add id in constructor and return it here

@@ -5,9 +5,10 @@
 
 #include "types.h"
 
-struct StorageLocalSymbolData
+class StorageLocalSymbolData : BaseElement
 {
-	StorageLocalSymbolData(): name(L"") {}
+public:
+	StorageLocalSymbolData() : name(L"") { m_type = BE_LOCALSYMBOL; }
 
 	StorageLocalSymbolData(std::wstring name): name(std::move(name)) {}
 
@@ -15,12 +16,13 @@ struct StorageLocalSymbolData
 	{
 		return name < other.name;
 	}
-
+public:
 	std::wstring name;
 };
 
-struct StorageLocalSymbol: public StorageLocalSymbolData
+class StorageLocalSymbol: public StorageLocalSymbolData
 {
+public:
 	StorageLocalSymbol(): StorageLocalSymbolData(), id(0) {}
 
 	StorageLocalSymbol(Id id, const StorageLocalSymbolData& data)
@@ -29,7 +31,7 @@ struct StorageLocalSymbol: public StorageLocalSymbolData
 	}
 
 	StorageLocalSymbol(Id id, std::wstring name): StorageLocalSymbolData(std::move(name)), id(id) {}
-
+public:
 	Id id;
 };
 

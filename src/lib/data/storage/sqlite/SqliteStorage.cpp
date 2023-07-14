@@ -3,6 +3,7 @@
 #include "FileSystem.h"
 #include "TimeStamp.h"
 #include "logging.h"
+#include "tracing.h"
 #include "utilityString.h"
 
 SqliteStorage::SqliteStorage(const FilePath& dbFilePath): m_dbFilePath(dbFilePath.getCanonical())
@@ -14,6 +15,7 @@ SqliteStorage::SqliteStorage(const FilePath& dbFilePath): m_dbFilePath(dbFilePat
 
 	try
 	{
+		// m_database.open(utility::encodeToUtf8(m_dbFilePath.wstr()).c_str());
 		m_database.open(utility::encodeToUtf8(m_dbFilePath.wstr()).c_str());
 	}
 	catch (CppSQLite3Exception& e)
@@ -236,6 +238,7 @@ CppSQLite3Query SqliteStorage::executeQuery(const std::string& statement) const
 {
 	try
 	{
+		TIME_TRACE();
 		return m_database.execQuery(statement.c_str());
 	}
 	catch (CppSQLite3Exception e)
@@ -269,6 +272,10 @@ bool SqliteStorage::hasTable(const std::string& tableName) const
 	}
 
 	return false;
+}
+
+CppSQLite3Table SqliteStorage::getTable(const std::string& szsql) const {
+	return m_database.getTable(szsql.c_str());
 }
 
 std::string SqliteStorage::getMetaValue(const std::string& key) const

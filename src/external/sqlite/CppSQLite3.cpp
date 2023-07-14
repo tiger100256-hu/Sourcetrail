@@ -1218,6 +1218,43 @@ void CppSQLite3DB::open(const char* szFile)
 	setBusyTimeout(mnBusyTimeoutMs);
 }
 
+void CppSQLite3DB::openInMemory(const char* szFile)
+{
+	int rc;					 /* Function return code */
+	sqlite3 *pFile, *pInMemory; /* Database connection opened on zFilename */
+	sqlite3_backup* pBackup; /* Backup object used to copy data */
+	sqlite3* pTo;			 /* Database to copy to (pFile or pInMemory) */
+	sqlite3* pFrom;			 /* Database to copy from (pFile or pInMemory) */
+
+	/* Open the database file identified by zFilename. Exit early if this fails
+	** for any reason. */
+	rc = sqlite3_open(szFile, &pFile);
+	if (rc == SQLITE_OK)
+	{
+		rc = sqlite3_open(":memory:", &pInMemory);
+		pFrom = pFile;
+		pTo = pInMemory;
+	}
+	if (rc == SQLITE_OK)
+	{
+		pBackup = sqlite3_backup_init(pTo, "main", pFrom, "main");
+		if (pBackup)
+		{
+			(void)sqlite3_backup_step(pBackup, -1);
+			(void)sqlite3_backup_finish(pBackup);
+		}
+		rc = sqlite3_errcode(pTo);
+	}
+
+	if (rc != SQLITE_OK)
+	{
+		throw CppSQLite3Exception(rc, "copy db to memory faild", DONT_DELETE_MSG);
+	}
+	sqlite3_close(pFile);
+	mpDB = pInMemory;
+	setBusyTimeout(mnBusyTimeoutMs);
+}
+
 
 void CppSQLite3DB::close()
 {

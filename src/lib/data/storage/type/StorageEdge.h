@@ -3,13 +3,15 @@
 
 #include "types.h"
 
-struct StorageEdgeData
+class StorageEdgeData: public BaseElement
 {
-	StorageEdgeData(): type(0), sourceNodeId(0), targetNodeId(0) {}
+public:
+	StorageEdgeData(): type(0), sourceNodeId(0), targetNodeId(0) {m_type = BE_EDGE;}
 
 	StorageEdgeData(int type, Id sourceNodeId, Id targetNodeId)
 		: type(type), sourceNodeId(sourceNodeId), targetNodeId(targetNodeId)
 	{
+		m_type = BE_EDGE;
 	}
 
 	bool operator<(const StorageEdgeData& other) const
@@ -27,14 +29,15 @@ struct StorageEdgeData
 			return targetNodeId < other.targetNodeId;
 		}
 	}
-
-	int type;
+public:
+	uint16_t type;
 	Id sourceNodeId;
 	Id targetNodeId;
 };
 
-struct StorageEdge: public StorageEdgeData
+class StorageEdge: public StorageEdgeData
 {
+public:
 	StorageEdge(): StorageEdgeData(), id(0) {}
 
 	StorageEdge(Id id, const StorageEdgeData& data): StorageEdgeData(data), id(id) {}
@@ -43,7 +46,7 @@ struct StorageEdge: public StorageEdgeData
 		: StorageEdgeData(type, sourceNodeId, targetNodeId), id(id)
 	{
 	}
-
+public:
 	Id id;
 };
 

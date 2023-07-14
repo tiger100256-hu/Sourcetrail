@@ -34,6 +34,7 @@ public:
 
 	void setTime();
 	TimeStamp getTime() const;
+	CppSQLite3Query executeQuery(const std::string& statement) const;
 
 protected:
 	void setupMetaTable();
@@ -43,10 +44,11 @@ protected:
 	bool executeStatement(CppSQLite3Statement& statement) const;
 	int executeStatementScalar(const std::string& statement, const int nullValue) const;
 	int executeStatementScalar(CppSQLite3Statement& statement, const int nullValue) const;
-	CppSQLite3Query executeQuery(const std::string& statement) const;
+	
 	CppSQLite3Query executeQuery(CppSQLite3Statement& statement) const;
 
 	bool hasTable(const std::string& tableName) const;
+	CppSQLite3Table getTable(const std::string& tableName) const;
 
 	std::string getMetaValue(const std::string& key) const;
 	void insertOrUpdateMetaValue(const std::string& key, const std::string& value);
