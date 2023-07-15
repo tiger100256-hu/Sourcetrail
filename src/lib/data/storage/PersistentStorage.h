@@ -293,7 +293,8 @@ private:
 	std::vector<BaseElementPtr> m_BES;
 	std::vector<Id> m_file_ids;
 	std::vector<Id> m_node_ids;
-	std::vector<Id> m_edges_ids;
+	std::vector<Id> m_edges_members_ids;
+	std::vector<Id> m_edges_others_ids;
 };
 
 #endif	  // PERSISTENT_STORAGE_H

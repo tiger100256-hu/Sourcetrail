@@ -622,7 +622,7 @@ void PersistentStorage::buildCachesNew()
 		edge->type = q_edge.getIntField(1, -1);
 		edge->sourceNodeId = q_edge.getIntField(2, 0);
 	    edge->targetNodeId = q_edge.getIntField(3, 0);
-		// m_BES[edge->id] = edge;
+		m_BES[edge->id] = edge;
 		if (edge->type == Edge::typeToInt(Edge::EDGE_MEMBER)) {
 			bool sourceIsVisible = true;
 			if (auto sourceNode = UTILS::get_node(m_BES[edge->sourceNodeId]); sourceNode != nullptr) {
@@ -644,13 +644,14 @@ void PersistentStorage::buildCachesNew()
 				sourceIsVisible,
 				sourceIsImplicit,
 				targetIsImplicit);
-
-			m_BES[edge->id] = edge;
+			m_edges_members_ids.push_back(edge->id);
 		} else if (edge->type == Edge::typeToInt(Edge::EDGE_INHERITANCE)) {
 			m_hierarchyCache.createInheritance(edge->id, edge->sourceNodeId, edge->targetNodeId);
-			m_BES[edge->id] = edge;
+			m_edges_others_ids.push_back(edge->id);
 		}
-		m_edges_ids.push_back(edge->id);
+		else {
+			m_edges_others_ids.push_back(edge->id);
+		}
 		q_edge.nextRow();
 	}
 
@@ -1380,20 +1381,16 @@ std::shared_ptr<Graph> PersistentStorage::getGraphForActiveTokenIds(
 				nodeIds.push_back(elementId);
 				edgeIds.clear();
 
-				if (m_edges_ids.size() > 0)
+				if (m_edges_others_ids.size() > 0)
 				{
-					for (auto& id:m_edges_ids)
+					TRACE("edge1");
+					for (auto& id:m_edges_others_ids)
 					{
 						auto edge = UTILS::get_edge_unsafe(m_BES[id]);
 						if (edge->sourceNodeId != elementId && edge->targetNodeId != elementId) {
 							continue;
 						}
 						Edge::EdgeType edgeType = Edge::intToType(edge->type);
-						if (edgeType == Edge::EDGE_MEMBER)
-						{
-							continue;
-						}
-
 						if (nodeType.isUsable() && (edgeType & Edge::EDGE_TYPE_USAGE) &&
 							m_hierarchyCache.isChildOfVisibleNodeOrInvisible(edge->sourceNodeId) &&
 							(m_hierarchyCache.getLastVisibleParentNodeId(edge->targetNodeId) !=
@@ -1453,50 +1450,77 @@ std::shared_ptr<Graph> PersistentStorage::getGraphForActiveTokenIds(
 		}
 		else
 		{
-			if (m_edges_ids.size() > 0) {
+			if (m_edges_others_ids.size() > 0) {
 				if (UTILS::is_edge(m_BES[elementId])) {
 					edgeIds.push_back(elementId);
 				}
 			}
 			else {
+				// old code
 				if (m_sqliteIndexStorage.isEdge(elementId))
 					edgeIds.push_back(elementId);
+				//
 			}
 		}
 	}
 
 	if (ids.size() >= 1 || isPackage)
 	{
-		std::set<Id> symbolIds;
-		for (const StorageSymbol& symbol: m_sqliteIndexStorage.getAllByIds<StorageSymbol>(ids))
-		{
-			if (symbol.id > 0 &&
-				(!isPackage || intToDefinitionKind(symbol.definitionKind) != DEFINITION_IMPLICIT))
-			{
-				nodeIds.push_back(symbol.id);
-			}
-			symbolIds.insert(symbol.id);
-		}
-		for (const StorageNode& node: m_sqliteIndexStorage.getAllByIds<StorageNode>(ids))
-		{
-			if (symbolIds.find(node.id) == symbolIds.end())
-			{
-				nodeIds.push_back(node.id);
-			}
-		}
-
-		if (!isPackage)
-		{
-			if (nodeIds.size() != ids.size())
-			{
-				for (const StorageEdge& edge: m_sqliteIndexStorage.getAllByIds<StorageEdge>(ids))
+		if (m_node_ids.size() > 0) {
+			for (auto& id: ids) {
+				if (UTILS::is_node(m_BES[id]))
 				{
-					if (edge.id > 0)
+					auto symbol = UTILS::get_symbol(m_BES[id]);
+					if (symbol != nullptr &&
+						(!isPackage ||
+						 intToDefinitionKind(symbol->definitionKind) != DEFINITION_IMPLICIT))
 					{
-						edgeIds.push_back(edge.id);
+						nodeIds.push_back(id);
+					}
+					else if (symbol == nullptr)
+					{
+						nodeIds.push_back(id);
+					}
+				}
+				else if (!isPackage && UTILS::is_edge(m_BES[id])) {
+					edgeIds.push_back(id);
+				}
+			}
+		}
+		else {
+			// old implemented start
+			std::set<Id> symbolIds;
+			for (const StorageSymbol& symbol: m_sqliteIndexStorage.getAllByIds<StorageSymbol>(ids))
+			{
+				if (symbol.id > 0 &&
+					(!isPackage || intToDefinitionKind(symbol.definitionKind) != DEFINITION_IMPLICIT))
+				{
+					nodeIds.push_back(symbol.id);
+				}
+				symbolIds.insert(symbol.id);
+			}
+			for (const StorageNode& node: m_sqliteIndexStorage.getAllByIds<StorageNode>(ids))
+			{
+				if (symbolIds.find(node.id) == symbolIds.end())
+				{
+					nodeIds.push_back(node.id);
+				}
+			}
+
+			if (!isPackage)
+			{
+				if (nodeIds.size() != ids.size())
+				{
+					for (const StorageEdge& edge: m_sqliteIndexStorage.getAllByIds<StorageEdge>(ids))
+					{
+						if (edge.id > 0)
+						{
+							edgeIds.push_back(edge.id);
+						}
 					}
 				}
 			}
+            // old code end
 		}
 	}
 
