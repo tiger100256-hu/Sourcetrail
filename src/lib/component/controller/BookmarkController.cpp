@@ -328,7 +328,12 @@ void BookmarkController::handleMessage(MessageActivateTokens* message)
 		}
 		else
 		{
-			MessageBookmarkButtonState(tabId, MessageBookmarkButtonState::CAN_CREATE).dispatch();
+			const SearchMatch match = message->getSearchMatches()[0];
+			const std::wstring name = utility::elide(match.getFullName(), utility::ELIDE_RIGHT, 50);
+			const std::wstring comment = utility::decodeFromUtf8("");
+			const std::wstring category = utility::decodeFromUtf8("history");
+			createBookmark(name, comment, category, 0);
+			// MessageBookmarkButtonState(tabId, MessageBookmarkButtonState::CAN_CREATE).dispatch();
 		}
 	}
 	else if (!message->isEdge)
@@ -341,7 +346,12 @@ void BookmarkController::handleMessage(MessageActivateTokens* message)
 		}
 		else
 		{
-			MessageBookmarkButtonState(tabId, MessageBookmarkButtonState::CAN_CREATE).dispatch();
+			const SearchMatch match = message->getSearchMatches()[0];
+			const std::wstring name = utility::elide(match.getFullName(), utility::ELIDE_RIGHT, 50);
+			const std::wstring comment = utility::decodeFromUtf8("");
+			const std::wstring category = utility::decodeFromUtf8("history");
+			createBookmark(name, comment, category, 0);
+			// MessageBookmarkButtonState(tabId, MessageBookmarkButtonState::CAN_CREATE).dispatch();
 		}
 	}
 }

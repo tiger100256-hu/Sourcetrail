@@ -16,7 +16,8 @@ QtContextMenu* QtContextMenu::s_instance;
 QAction* QtContextMenu::s_undoAction;
 QAction* QtContextMenu::s_redoAction;
 
-QAction* QtContextMenu::s_copyFullPathAction;
+QAction* QtContextMenu::s_copyLinuxPathAction;
+QAction* QtContextMenu::s_copyWindowsPathAction;
 QAction* QtContextMenu::s_openContainingFolderAction;
 
 FilePath QtContextMenu::s_filePath;
@@ -52,10 +53,12 @@ void QtContextMenu::addFileActions(const FilePath& filePath)
 {
 	s_filePath = filePath;
 
-	s_copyFullPathAction->setEnabled(!s_filePath.empty());
+	s_copyLinuxPathAction->setEnabled(!s_filePath.empty());
+	s_copyWindowsPathAction ->setEnabled(!s_filePath.empty());
 	s_openContainingFolderAction->setEnabled(!s_filePath.empty());
 
-	addAction(s_copyFullPathAction);
+	addAction(s_copyLinuxPathAction);
+	addAction(s_copyWindowsPathAction);
 	addAction(s_openContainingFolderAction);
 }
 
@@ -75,14 +78,23 @@ QtContextMenu* QtContextMenu::getInstance()
 		s_redoAction->setToolTip(tr("Go forward to next active symbol"));
 		connect(s_redoAction, &QAction::triggered, s_instance, &QtContextMenu::redoActionTriggered);
 
-		s_copyFullPathAction = new QAction(tr("Copy Full Path"), s_instance);
-		s_copyFullPathAction->setStatusTip(tr("Copies the path of this file to the clipboard"));
-		s_copyFullPathAction->setToolTip(tr("Copies the path of this file to the clipboard"));
+		s_copyLinuxPathAction = new QAction(tr("Copy Linux Linux Path"), s_instance);
+		s_copyLinuxPathAction->setStatusTip(tr("Copies the path of this file to the clipboard"));
+		s_copyLinuxPathAction->setToolTip(tr("Copies the path of this file to the clipboard"));
 		connect(
-			s_copyFullPathAction,
+			s_copyLinuxPathAction,
 			&QAction::triggered,
 			s_instance,
-			&QtContextMenu::copyFullPathActionTriggered);
+			&QtContextMenu::copyLinuxPathActionTriggered);
+
+		s_copyWindowsPathAction = new QAction(tr("Copy Windows Windows Path"), s_instance);
+		s_copyWindowsPathAction->setStatusTip(tr("Copies the path of this file to the clipboard"));
+		s_copyWindowsPathAction->setToolTip(tr("Copies the path of this file to the clipboard"));
+		connect(
+			s_copyWindowsPathAction,
+			&QAction::triggered,
+			s_instance,
+			&QtContextMenu::copyWindowsPathActionTriggered);
 
 		s_openContainingFolderAction = new QAction(tr("Open Containing Folder"), s_instance);
 		s_openContainingFolderAction->setStatusTip(tr("Opens the folder that contains this file"));
@@ -121,6 +133,20 @@ void QtContextMenu::copyFullPathActionTriggered()
 {
 	QApplication::clipboard()->setText(
 		QDir::toNativeSeparators(QString::fromStdWString(s_filePath.wstr())));
+}
+
+void QtContextMenu::copyLinuxPathActionTriggered()
+{
+	auto pathStr = QString::fromStdWString(s_filePath.wstr());
+	pathStr = pathStr.replace("\\", "/");
+	QApplication::clipboard()->setText(pathStr);
+}
+
+void QtContextMenu::copyWindowsPathActionTriggered ()
+{
+	auto pathStr = QString::fromStdWString(s_filePath.wstr());
+	pathStr = pathStr.replace("/", "\\");
+	QApplication::clipboard()->setText(pathStr);
 }
 
 void QtContextMenu::openContainingFolderActionTriggered()

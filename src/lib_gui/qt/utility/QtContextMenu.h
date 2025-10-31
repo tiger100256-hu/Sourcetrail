@@ -33,6 +33,8 @@ private slots:
 	void redoActionTriggered();
 
 	void copyFullPathActionTriggered();
+	void copyLinuxPathActionTriggered();
+	void copyWindowsPathActionTriggered();
 	void openContainingFolderActionTriggered();
 
 private:
@@ -43,7 +45,8 @@ private:
 	static QAction* s_undoAction;
 	static QAction* s_redoAction;
 
-	static QAction* s_copyFullPathAction;
+	static QAction* s_copyLinuxPathAction;
+	static QAction* s_copyWindowsPathAction;
 	static QAction* s_openContainingFolderAction;
 
 	static FilePath s_filePath;
